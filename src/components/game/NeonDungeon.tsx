@@ -41,6 +41,9 @@ export function NeonDungeon() {
   const [roomId, setRoomId] = useState<string>(() => key(2, 2));
   const [roomState, setRoomState] = useState<Room["state"]>("CLEARED");
   const [dead, setDead] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
 
   const patternRef = useRef(pattern);
   patternRef.current = pattern;
