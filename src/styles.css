@@ -19,6 +19,15 @@
  */
 
 @theme inline {
+  --font-pixel: "Press Start 2P", monospace;
+  --color-neon-cyan: var(--neon-cyan);
+  --color-neon-magenta: var(--neon-magenta);
+  --color-neon-yellow: var(--neon-yellow);
+  --color-neon-purple: var(--neon-purple);
+  --color-neon-red: var(--neon-red);
+  --color-panel: var(--panel);
+  --shadow-neon-cyan: 0 0 18px oklch(0.78 0.15 220 / 0.35);
+  --shadow-neon-magenta: 0 0 22px oklch(0.7 0.28 330 / 0.35);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
