@@ -498,9 +498,9 @@ export function NeonDungeon() {
         for (const p of shopPeds) {
           if (p.sold) continue;
           const near = Math.hypot(p.x - player.current.x, p.y - player.current.y) < 34;
-          if (near && (k["e"] || true)) {
+          if (near) {
             const def = SHOP_ITEMS.find((i) => i.id === p.item)!;
-            if (k["e"] || coinsRef.current >= def.cost) buy(p);
+            if (coinsRef.current >= def.cost) buy(p);
           }
         }
       }
