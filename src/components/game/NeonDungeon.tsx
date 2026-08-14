@@ -640,7 +640,7 @@ export function NeonDungeon() {
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [clearRoom, damagePlayer, enterRoom, goToFloor]);
+  }, [clearRoom, damagePlayer, enterRoom, goToFloor, mounted]);
 
   const cur = floor.rooms[roomId];
 
