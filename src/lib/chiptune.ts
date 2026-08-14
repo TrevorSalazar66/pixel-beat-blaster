@@ -81,3 +81,21 @@ export function playTrack(track: TrackId, time?: number) {
     osc.stop(t + i * 0.045 + 0.14);
   });
 }
+
+/** Death: synth slowing down with a pitch-bend downwards. */
+export function playDeath() {
+  const ac = getAudio();
+  const t = ac.currentTime;
+  [220, 165, 110].forEach((f, i) => {
+    const osc = ac.createOscillator();
+    const g = ac.createGain();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(f, t + i * 0.18);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(30, f / 6), t + i * 0.18 + 0.9);
+    g.gain.setValueAtTime(0.35, t + i * 0.18);
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.18 + 1.1);
+    osc.connect(g).connect(out());
+    osc.start(t + i * 0.18);
+    osc.stop(t + i * 0.18 + 1.2);
+  });
+}

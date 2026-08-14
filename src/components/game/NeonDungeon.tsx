@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getAudio, playTrack, type TrackId } from "@/lib/chiptune";
+import { getAudio, playDeath, playTrack, type TrackId } from "@/lib/chiptune";
 import { Sequencer } from "./Sequencer";
-import { Minimap } from "./Minimap";
-import { STEPS, TRACKS, createPattern, type Pattern } from "./tracks";
+import { SequencerEditor } from "./SequencerEditor";
+import { HUD } from "./HUD";
+import { STEPS, TRACKS, countNotes, createPattern, type Pattern } from "./tracks";
 import { ROOM_H, ROOM_W, TILE, TILE_PROPS, T } from "./dungeon/tiles";
 import {
   dirDelta,
@@ -14,65 +15,103 @@ import {
   type Room,
 } from "./dungeon/generate";
 import { rollBlock } from "./dungeon/drops";
-import type { Enemy } from "./dungeon/enemies";
+import { SHOP_ITEMS, type ShopItemId } from "./dungeon/shop";
 
 const W = ROOM_W * TILE;
 const H = ROOM_H * TILE;
 const SIZE = 28;
 const SPEED = 190;
-const BPM = 120;
-const MAX_HP = 6;
+const START_HP = 3;
 
 type Vec = { x: number; y: number };
-type Shot = { x: number; y: number; vx: number; vy: number; life: number; color: string; r: number; dmg: number; hostile: boolean };
+type Shot = {
+  x: number; y: number; vx: number; vy: number; life: number;
+  color: string; r: number; dmg: number; hostile: boolean; pierce: boolean;
+  hit?: Set<string>;
+};
 type Blast = { x: number; y: number; t: number; hit: Set<string> };
-type Pickup = { x: number; y: number; track: TrackId; color: string };
+type Pickup = { x: number; y: number; kind: "block" | "coin"; track?: TrackId; color: string };
+type Pedestal = { x: number; y: number; item: ShopItemId; sold: boolean };
 
-const emptyInv = (): Record<TrackId, number> => ({ kick: 1, snare: 0, hat: 0, synth: 0 });
+const emptyInv = (): Record<TrackId, number> => ({ kick: 0, snare: 0, hat: 0, synth: 0 });
 
 export function NeonDungeon() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [pattern, setPattern] = useState<Pattern>(createPattern);
   const [currentStep, setCurrentStep] = useState(-1);
   const [running, setRunning] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [inventory, setInventory] = useState<Record<TrackId, number>>(emptyInv);
-  const [hp, setHp] = useState(MAX_HP);
+  const [rareInventory, setRareInventory] = useState<Record<TrackId, number>>(emptyInv);
+  const [coins, setCoins] = useState(0);
+  const [bpm, setBpm] = useState(120);
+  const [maxHp, setMaxHp] = useState(START_HP);
+  const [hp, setHp] = useState(START_HP);
+  const [kills, setKills] = useState(0);
   const [floor, setFloor] = useState<Floor>(() => generateFloor(1));
   const [roomId, setRoomId] = useState<string>(() => key(2, 2));
   const [roomState, setRoomState] = useState<Room["state"]>("CLEARED");
   const [dead, setDead] = useState(false);
+  const [transition, setTransition] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-
   const patternRef = useRef(pattern);
   patternRef.current = pattern;
-  const invRef = useRef(inventory);
-  invRef.current = inventory;
   const floorRef = useRef(floor);
   floorRef.current = floor;
   const roomIdRef = useRef(roomId);
   roomIdRef.current = roomId;
-  const hpRef = useRef(hp);
-  hpRef.current = hp;
+  const coinsRef = useRef(coins);
+  coinsRef.current = coins;
   const deadRef = useRef(dead);
   deadRef.current = dead;
+  const frozenRef = useRef(false);
+  frozenRef.current = paused || editorOpen || dead || transition !== null;
 
   const keys = useRef<Record<string, boolean>>({});
   const player = useRef<Vec>({ x: W / 2, y: H / 2 });
-  const facing = useRef<Vec>({ x: 1, y: 0 });
+  const aimAngle = useRef(0);
+  const aimVel = useRef(0);
+  const mouse = useRef<Vec>({ x: W / 2 + 60, y: H / 2 });
   const shots = useRef<Shot[]>([]);
   const blasts = useRef<Blast[]>([]);
   const pickups = useRef<Pickup[]>([]);
+  const pedestals = useRef<Record<string, Pedestal[]>>({});
   const shield = useRef(0);
   const pulse = useRef(0);
   const invuln = useRef(0);
   const spikeT = useRef(0);
+  const glitch = useRef(0);
 
   const room = () => floorRef.current.rooms[roomIdRef.current]!;
 
-  const toggle = useCallback((t: number, s: number) => {
-    setPattern((p) => p.map((row, i) => (i === t ? row.map((v, j) => (j === s ? !v : v)) : row)));
+  /* ---------- editor actions ---------- */
+  const placeBlock = useCallback(
+    (t: number, s: number, block: { track: TrackId; rare: boolean }) => {
+      const prev = patternRef.current[t]?.[s] ?? null;
+      const setInv = block.rare ? setRareInventory : setInventory;
+      setInv((inv) => ({ ...inv, [block.track]: Math.max(0, (inv[block.track] ?? 0) - 1) }));
+      if (prev) {
+        const back = prev.rare ? setRareInventory : setInventory;
+        const trackId = TRACKS[t]!.id;
+        back((inv) => ({ ...inv, [trackId]: (inv[trackId] ?? 0) + 1 }));
+      }
+      setPattern((p) =>
+        p.map((row, i) => (i === t ? row.map((c, j) => (j === s ? { rare: block.rare } : c)) : row)),
+      );
+    },
+    [],
+  );
+
+  const removeBlock = useCallback((t: number, s: number) => {
+    const prev = patternRef.current[t]?.[s] ?? null;
+    if (!prev) return;
+    const trackId = TRACKS[t]!.id;
+    const back = prev.rare ? setRareInventory : setInventory;
+    back((inv) => ({ ...inv, [trackId]: (inv[trackId] ?? 0) + 1 }));
+    setPattern((p) => p.map((row, i) => (i === t ? row.map((c, j) => (j === s ? null : c)) : row)));
   }, []);
 
   /* ---------- helpers ---------- */
@@ -103,7 +142,12 @@ export function NeonDungeon() {
     invuln.current = 1;
     setHp((h) => {
       const n = Math.max(0, h - amount);
-      if (n === 0) setDead(true);
+      if (n === 0) {
+        setDead(true);
+        deadRef.current = true;
+        glitch.current = 1;
+        playDeath();
+      }
       return n;
     });
   }, []);
@@ -118,6 +162,7 @@ export function NeonDungeon() {
       pickups.current.push({
         x: W / 2 + (i - (n - 1) / 2) * 46,
         y: H / 2,
+        kind: "block",
         track,
         color: t.color,
       });
@@ -129,22 +174,41 @@ export function NeonDungeon() {
     bump();
   }, []);
 
-  const enterRoom = useCallback((r: Room) => {
-    if (r.state === "UNVISITED") {
-      if (r.enemies.length > 0) {
-        r.state = "COMBAT";
-        r.doors.forEach((d) => (d.locked = true));
-        setRoomState("COMBAT");
+  const ensurePedestals = useCallback((r: Room) => {
+    if (r.type !== "SHOP" || pedestals.current[r.id]) return;
+    const items: ShopItemId[] = [...SHOP_ITEMS]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 3)
+      .map((i) => i.id);
+    pedestals.current[r.id] = items.map((item, i) => ({
+      x: W / 2 + (i - 1) * 130,
+      y: H / 2 + 40,
+      item,
+      sold: false,
+    }));
+  }, []);
+
+  const enterRoom = useCallback(
+    (r: Room) => {
+      ensurePedestals(r);
+      if (r.state === "UNVISITED") {
+        if (r.enemies.length > 0) {
+          r.state = "COMBAT";
+          r.doors.forEach((d) => (d.locked = true));
+          setRoomState("COMBAT");
+        } else {
+          clearRoom(r);
+        }
       } else {
-        clearRoom(r);
+        setRoomState(r.state);
       }
-    } else {
-      setRoomState(r.state);
-    }
-    bump();
-  }, [clearRoom]);
+      bump();
+    },
+    [clearRoom, ensurePedestals],
+  );
 
   const goToFloor = useCallback((level: number) => {
+    setTransition(`Carregando Andar B${level}...`);
     const f = generateFloor(level);
     floorRef.current = f;
     setFloor(f);
@@ -155,22 +219,40 @@ export function NeonDungeon() {
     shots.current = [];
     blasts.current = [];
     pickups.current = [];
+    pedestals.current = {};
+    window.setTimeout(() => setTransition(null), 900);
   }, []);
 
   const restart = useCallback(() => {
     setInventory(emptyInv());
-    setHp(MAX_HP);
+    setRareInventory(emptyInv());
+    setPattern(createPattern());
+    setCoins(0);
+    setKills(0);
+    setBpm(120);
+    setMaxHp(START_HP);
+    setHp(START_HP);
     setDead(false);
     deadRef.current = false;
+    glitch.current = 0;
+    setPaused(false);
+    setEditorOpen(false);
     goToFloor(1);
   }, [goToFloor]);
 
   /* ---- input ---- */
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      keys.current[e.key.toLowerCase()] = true;
-      if (e.key.startsWith("Arrow") || [" ", "w", "a", "s", "d"].includes(e.key.toLowerCase()))
+      const k = e.key.toLowerCase();
+      keys.current[k] = true;
+      if (e.key.startsWith("Arrow") || [" ", "w", "a", "s", "d", "tab"].includes(k))
         e.preventDefault();
+      if (deadRef.current) return;
+      if (k === "tab" || k === " ") {
+        const inCombat = floorRef.current.rooms[roomIdRef.current]?.state === "COMBAT";
+        if (!inCombat) setEditorOpen((v) => !v);
+      }
+      if (k === "p" || k === "escape") setPaused((v) => !v);
     };
     const up = (e: KeyboardEvent) => {
       keys.current[e.key.toLowerCase()] = false;
@@ -183,30 +265,57 @@ export function NeonDungeon() {
     };
   }, []);
 
+  /* ---- shop purchase ---- */
+  const buy = useCallback((p: Pedestal) => {
+    const def = SHOP_ITEMS.find((i) => i.id === p.item)!;
+    if (p.sold || coinsRef.current < def.cost) return;
+    p.sold = true;
+    setCoins((c) => c - def.cost);
+    if (def.id === "heal") setHp((h) => Math.min(h + 1, 99));
+    if (def.id === "maxhp") {
+      setMaxHp((m) => m + 1);
+      setHp((h) => h + 1);
+    }
+    if (def.id === "bpm") setBpm((b) => b + 10);
+    if (def.id === "rare") {
+      const track = rollBlock();
+      setRareInventory((inv) => ({ ...inv, [track]: (inv[track] ?? 0) + 1 }));
+    }
+    playTrack("synth");
+  }, []);
+
   /* ---- sequencer actions ---- */
-  const fire = useCallback((trackIndex: number) => {
+  const fire = useCallback((trackIndex: number, rare: boolean) => {
     const track = TRACKS[trackIndex];
-    if (!track) return;
-    if ((invRef.current[track.id] ?? 0) <= 0) return;
+    if (!track || frozenRef.current) return;
     const cx = player.current.x;
     const cy = player.current.y;
-    const f = facing.current;
+    const a = aimAngle.current;
+    const f = { x: Math.cos(a), y: Math.sin(a) };
 
     if (track.id === "kick") {
-      shots.current.push({ x: cx, y: cy, vx: f.x * 300, vy: f.y * 300, life: 2, color: track.color, r: 8, dmg: 8, hostile: false });
-      pulse.current = 1;
-    } else if (track.id === "hat") {
-      const base = Math.atan2(f.y, f.x);
-      for (const off of [-0.25, 0, 0.25]) {
+      const spread = rare ? [-0.12, 0.12] : [0];
+      for (const off of spread) {
         shots.current.push({
           x: cx, y: cy,
-          vx: Math.cos(base + off) * 720,
-          vy: Math.sin(base + off) * 720,
-          life: 1.2, color: track.color, r: 3.5, dmg: 2, hostile: false,
+          vx: Math.cos(a + off) * 300, vy: Math.sin(a + off) * 300,
+          life: 2, color: rare ? "#ffffff" : track.color, r: 8, dmg: 8,
+          hostile: false, pierce: rare, hit: new Set(),
+        });
+      }
+      pulse.current = 1;
+    } else if (track.id === "hat") {
+      const offs = rare ? [-0.35, -0.12, 0.12, 0.35] : [-0.25, 0, 0.25];
+      for (const off of offs) {
+        shots.current.push({
+          x: cx, y: cy,
+          vx: Math.cos(a + off) * 720, vy: Math.sin(a + off) * 720,
+          life: 1.2, color: rare ? "#ffffff" : track.color, r: 3.5, dmg: rare ? 3 : 2,
+          hostile: false, pierce: rare, hit: new Set(),
         });
       }
     } else if (track.id === "snare") {
-      shield.current = 0.5;
+      shield.current = rare ? 0.9 : 0.5;
       blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set() });
       shots.current = shots.current.filter((s) => !s.hostile);
       const r = room();
@@ -221,14 +330,15 @@ export function NeonDungeon() {
       }
     } else {
       blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set() });
+      if (rare) blasts.current.push({ x: cx + f.x * 70, y: cy + f.y * 70, t: 0, hit: new Set() });
     }
   }, []);
 
   /* ---- audio clock ---- */
   useEffect(() => {
-    if (!running) return;
+    if (!running || paused || editorOpen || dead || transition) return;
     const ac = getAudio();
-    const stepDur = 60 / BPM / 4;
+    const stepDur = 60 / bpm / 4;
     let next = ac.currentTime + 0.1;
     let step = 0;
     let raf = 0;
@@ -240,14 +350,15 @@ export function NeonDungeon() {
         const when = next;
         patternRef.current.forEach((row, t) => {
           const track = TRACKS[t];
-          if (row[s] && track && (invRef.current[track.id] ?? 0) > 0) playTrack(track.id, when);
+          if (row[s] && track) playTrack(track.id, when);
         });
         timers.push(
           window.setTimeout(
             () => {
               setCurrentStep(s);
               patternRef.current.forEach((row, t) => {
-                if (row[s]) fire(t);
+                const cell = row[s];
+                if (cell) fire(t, cell.rare);
               });
             },
             Math.max(0, (when - ac.currentTime) * 1000),
@@ -264,7 +375,7 @@ export function NeonDungeon() {
       timers.forEach(clearTimeout);
       setCurrentStep(-1);
     };
-  }, [running, fire]);
+  }, [running, fire, bpm, paused, editorOpen, dead, transition]);
 
   /* ---- simulation + render ---- */
   useEffect(() => {
@@ -276,16 +387,28 @@ export function NeonDungeon() {
     let last = performance.now();
 
     const loop = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 0.05);
+      const rawDt = Math.min((now - last) / 1000, 0.05);
       last = now;
+      const frozen = frozenRef.current;
+      const dt = frozen ? 0 : rawDt;
       const r = room();
-      const alive = !deadRef.current;
+
+      /* aim: follows the mouse with rotational inertia */
+      {
+        const target = Math.atan2(mouse.current.y - player.current.y, mouse.current.x - player.current.x);
+        let diff = target - aimAngle.current;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        aimVel.current += diff * 110 * dt;
+        aimVel.current *= Math.pow(0.02, dt);
+        aimAngle.current += aimVel.current * dt;
+      }
 
       /* movement */
       const k = keys.current;
       let dx = 0;
       let dy = 0;
-      if (alive) {
+      if (!frozen) {
         if (k["a"] || k["arrowleft"]) dx -= 1;
         if (k["d"] || k["arrowright"]) dx += 1;
         if (k["w"] || k["arrowup"]) dy -= 1;
@@ -295,7 +418,6 @@ export function NeonDungeon() {
         const len = Math.hypot(dx, dy);
         dx /= len;
         dy /= len;
-        facing.current = { x: dx, y: dy };
         const half = SIZE / 2 - 3;
         const nx = player.current.x + dx * SPEED * dt;
         const ny = player.current.y + dy * SPEED * dt;
@@ -307,165 +429,204 @@ export function NeonDungeon() {
           player.current.y = ny;
       }
 
-      /* spikes */
-      const under = tileAt(r, player.current.x, player.current.y);
-      if (under === T.SPIKE) {
-        spikeT.current += dt;
-        if (spikeT.current >= 1.5) {
-          spikeT.current = 0;
-          damagePlayer(1);
+      if (!frozen) {
+        /* spikes */
+        const under = tileAt(r, player.current.x, player.current.y);
+        if (under === T.SPIKE) {
+          spikeT.current += dt;
+          if (spikeT.current >= 1.5) {
+            spikeT.current = 0;
+            damagePlayer(1);
+          }
+        } else spikeT.current = 0;
+
+        /* portal */
+        if (under === T.PORTAL) {
+          goToFloor(floorRef.current.level + 1);
+          raf = requestAnimationFrame(loop);
+          return;
         }
-      } else spikeT.current = 0;
 
-      /* portal */
-      if (under === T.PORTAL) {
-        goToFloor(floorRef.current.level + 1);
-        raf = requestAnimationFrame(loop);
-        return;
-      }
-
-      /* room transitions through doors */
-      if (under === T.DOOR && !r.doors.some((d) => d.locked)) {
-        let dir: Dir | null = null;
-        if (player.current.y < TILE) dir = "NORTH";
-        else if (player.current.y > H - TILE) dir = "SOUTH";
-        else if (player.current.x < TILE) dir = "WEST";
-        else if (player.current.x > W - TILE) dir = "EAST";
-        if (dir) {
-          const d = dirDelta(dir);
-          const nid = key(r.gridX + d.dx, r.gridY + d.dy);
-          const nextRoom = floorRef.current.rooms[nid];
-          if (nextRoom) {
-            roomIdRef.current = nid;
-            setRoomId(nid);
-            const back = opposite(dir);
-            player.current = {
-              x: back === "WEST" ? TILE * 1.6 : back === "EAST" ? W - TILE * 1.6 : W / 2,
-              y: back === "NORTH" ? TILE * 1.6 : back === "SOUTH" ? H - TILE * 1.6 : H / 2,
-            };
-            shots.current = [];
-            pickups.current = [];
-            enterRoom(nextRoom);
-            raf = requestAnimationFrame(loop);
-            return;
+        /* room transitions through doors */
+        if (under === T.DOOR && !r.doors.some((d) => d.locked)) {
+          let dir: Dir | null = null;
+          if (player.current.y < TILE) dir = "NORTH";
+          else if (player.current.y > H - TILE) dir = "SOUTH";
+          else if (player.current.x < TILE) dir = "WEST";
+          else if (player.current.x > W - TILE) dir = "EAST";
+          if (dir) {
+            const d = dirDelta(dir);
+            const nid = key(r.gridX + d.dx, r.gridY + d.dy);
+            const nextRoom = floorRef.current.rooms[nid];
+            if (nextRoom) {
+              roomIdRef.current = nid;
+              setRoomId(nid);
+              const back = opposite(dir);
+              player.current = {
+                x: back === "WEST" ? TILE * 1.6 : back === "EAST" ? W - TILE * 1.6 : W / 2,
+                y: back === "NORTH" ? TILE * 1.6 : back === "SOUTH" ? H - TILE * 1.6 : H / 2,
+              };
+              shots.current = [];
+              pickups.current = [];
+              enterRoom(nextRoom);
+              raf = requestAnimationFrame(loop);
+              return;
+            }
           }
         }
       }
 
       /* pickups */
-      pickups.current = pickups.current.filter((p) => {
-        if (Math.hypot(p.x - player.current.x, p.y - player.current.y) < 24) {
-          setInventory((inv) => ({ ...inv, [p.track]: (inv[p.track] ?? 0) + 1 }));
-          playTrack(p.track);
-          return false;
+      if (!frozen) {
+        pickups.current = pickups.current.filter((p) => {
+          if (Math.hypot(p.x - player.current.x, p.y - player.current.y) < 24) {
+            if (p.kind === "coin") setCoins((c) => c + 1);
+            else if (p.track) {
+              const tr = p.track;
+              setInventory((inv) => ({ ...inv, [tr]: (inv[tr] ?? 0) + 1 }));
+              playTrack(tr);
+            }
+            return false;
+          }
+          return true;
+        });
+      }
+
+      /* shop pedestals */
+      const shopPeds = pedestals.current[r.id] ?? [];
+      if (!frozen) {
+        for (const p of shopPeds) {
+          if (p.sold) continue;
+          const near = Math.hypot(p.x - player.current.x, p.y - player.current.y) < 34;
+          if (near) {
+            const def = SHOP_ITEMS.find((i) => i.id === p.item)!;
+            if (coinsRef.current >= def.cost) buy(p);
+          }
         }
-        return true;
-      });
+      }
 
       /* enemies */
       const cur = room();
-      for (const e of cur.enemies) {
-        if (e.spawnT > 0) {
-          e.spawnT -= dt;
-          continue;
-        }
-        e.hitFlash = Math.max(0, e.hitFlash - dt);
-        const flying = e.behavior === "FLY_IGNORES_CHASMS";
-        const ex = player.current.x - e.x;
-        const ey = player.current.y - e.y;
-        const dist = Math.hypot(ex, ey) || 1;
+      if (!frozen) {
+        for (const e of cur.enemies) {
+          if (e.spawnT > 0) {
+            e.spawnT -= dt;
+            continue;
+          }
+          e.hitFlash = Math.max(0, e.hitFlash - dt);
+          const flying = e.behavior === "FLY_IGNORES_CHASMS";
+          const ex = player.current.x - e.x;
+          const ey = player.current.y - e.y;
+          const dist = Math.hypot(ex, ey) || 1;
 
-        if (e.behavior === "RUSH_PLAYER" || flying || e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
-          const nx = e.x + (ex / dist) * e.speed * dt;
-          const ny = e.y + (ey / dist) * e.speed * dt;
-          if (!solidFor(cur, nx, e.y, flying)) e.x = nx;
-          if (!solidFor(cur, e.x, ny, flying)) e.y = ny;
-        }
+          if (e.behavior === "RUSH_PLAYER" || flying || e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
+            const nx = e.x + (ex / dist) * e.speed * dt;
+            const ny = e.y + (ey / dist) * e.speed * dt;
+            if (!solidFor(cur, nx, e.y, flying)) e.x = nx;
+            if (!solidFor(cur, e.x, ny, flying)) e.y = ny;
+          }
 
-        if (e.behavior === "SHOOT_AT_PLAYER_PERIODIC" || e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
-          e.cooldown -= dt;
-          if (e.cooldown <= 0) {
-            e.cooldown = e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES" ? 1.4 : 2;
-            if (e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
-              for (let i = 0; i < 10; i++) {
-                const a = (i / 10) * Math.PI * 2;
-                shots.current.push({ x: e.x, y: e.y, vx: Math.cos(a) * 200, vy: Math.sin(a) * 200, life: 2.4, color: e.color, r: 5, dmg: e.damage, hostile: true });
+          if (e.behavior === "SHOOT_AT_PLAYER_PERIODIC" || e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
+            e.cooldown -= dt;
+            if (e.cooldown <= 0) {
+              e.cooldown = e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES" ? 1.4 : 2;
+              if (e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
+                for (let i = 0; i < 10; i++) {
+                  const a = (i / 10) * Math.PI * 2;
+                  shots.current.push({ x: e.x, y: e.y, vx: Math.cos(a) * 200, vy: Math.sin(a) * 200, life: 2.4, color: e.color, r: 5, dmg: e.damage, hostile: true, pierce: false });
+                }
+              } else {
+                shots.current.push({ x: e.x, y: e.y, vx: (ex / dist) * 260, vy: (ey / dist) * 260, life: 2.4, color: e.color, r: 4.5, dmg: e.damage, hostile: true, pierce: false });
               }
-            } else {
-              shots.current.push({ x: e.x, y: e.y, vx: (ex / dist) * 260, vy: (ey / dist) * 260, life: 2.4, color: e.color, r: 4.5, dmg: e.damage, hostile: true });
             }
           }
-        }
 
-        // spike damage on enemies
-        if (tileAt(cur, e.x, e.y) === T.SPIKE && !flying) {
-          e.spikeT += dt;
-          if (e.spikeT >= 1.5) {
-            e.spikeT = 0;
-            e.hp -= 1;
-            e.hitFlash = 0.15;
-          }
-        }
-
-        // contact damage
-        if (dist < e.size / 2 + SIZE / 2 && shield.current <= 0) damagePlayer(e.damage);
-      }
-
-      /* shots */
-      shots.current = shots.current.filter((s) => {
-        s.x += s.vx * dt;
-        s.y += s.vy * dt;
-        s.life -= dt;
-        if (s.life <= 0) return false;
-        if (blocksShot(cur, s.x, s.y)) return false;
-        if (s.hostile) {
-          if (shield.current > 0) return false;
-          if (Math.hypot(s.x - player.current.x, s.y - player.current.y) < SIZE / 2 + s.r) {
-            damagePlayer(s.dmg);
-            return false;
-          }
-        } else {
-          for (const e of cur.enemies) {
-            if (e.spawnT > 0) continue;
-            if (Math.hypot(s.x - e.x, s.y - e.y) < e.size / 2 + s.r) {
-              e.hp -= s.dmg;
+          if (tileAt(cur, e.x, e.y) === T.SPIKE && !flying) {
+            e.spikeT += dt;
+            if (e.spikeT >= 1.5) {
+              e.spikeT = 0;
+              e.hp -= 1;
               e.hitFlash = 0.15;
+            }
+          }
+
+          if (dist < e.size / 2 + SIZE / 2 && shield.current <= 0) damagePlayer(e.damage);
+        }
+
+        /* shots */
+        shots.current = shots.current.filter((s) => {
+          s.x += s.vx * dt;
+          s.y += s.vy * dt;
+          s.life -= dt;
+          if (s.life <= 0) return false;
+          if (blocksShot(cur, s.x, s.y)) return false;
+          if (s.hostile) {
+            if (shield.current > 0) return false;
+            if (Math.hypot(s.x - player.current.x, s.y - player.current.y) < SIZE / 2 + s.r) {
+              damagePlayer(s.dmg);
               return false;
             }
+          } else {
+            for (const e of cur.enemies) {
+              if (e.spawnT > 0) continue;
+              if (s.hit?.has(e.uid)) continue;
+              if (Math.hypot(s.x - e.x, s.y - e.y) < e.size / 2 + s.r) {
+                e.hp -= s.dmg;
+                e.hitFlash = 0.15;
+                if (!s.pierce) return false;
+                s.hit?.add(e.uid);
+              }
+            }
           }
-        }
-        return true;
-      });
+          return true;
+        });
 
-      /* blasts (synth AoE / snare wave) */
-      blasts.current = blasts.current.filter((b) => {
-        b.t += dt;
-        const rad = b.t * 260;
-        for (const e of cur.enemies) {
-          if (e.spawnT > 0 || b.hit.has(e.uid)) continue;
-          if (Math.hypot(e.x - b.x, e.y - b.y) < rad) {
-            b.hit.add(e.uid);
-            e.hp -= 4;
-            e.hitFlash = 0.15;
+        /* blasts */
+        blasts.current = blasts.current.filter((b) => {
+          b.t += dt;
+          const rad = b.t * 260;
+          for (const e of cur.enemies) {
+            if (e.spawnT > 0 || b.hit.has(e.uid)) continue;
+            if (Math.hypot(e.x - b.x, e.y - b.y) < rad) {
+              b.hit.add(e.uid);
+              e.hp -= 4;
+              e.hitFlash = 0.15;
+            }
           }
-        }
-        return b.t < 0.45;
-      });
+          return b.t < 0.45;
+        });
 
-      /* deaths + room clear */
-      const before = cur.enemies.length;
-      cur.enemies = cur.enemies.filter((e) => e.hp > 0);
-      if (before !== cur.enemies.length && cur.enemies.length === 0 && cur.state === "COMBAT") {
-        clearRoom(cur);
+        /* deaths + coins + room clear */
+        const dying = cur.enemies.filter((e) => e.hp <= 0);
+        if (dying.length) {
+          for (const e of dying) {
+            const n = e.size > 40 ? 12 : 1 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < n; i++) {
+              pickups.current.push({
+                x: e.x + (Math.random() - 0.5) * 30,
+                y: e.y + (Math.random() - 0.5) * 30,
+                kind: "coin",
+                color: "#ffe23d",
+              });
+            }
+          }
+          setKills((v) => v + dying.length);
+          cur.enemies = cur.enemies.filter((e) => e.hp > 0);
+          if (cur.enemies.length === 0 && cur.state === "COMBAT") clearRoom(cur);
+        }
+
+        shield.current = Math.max(0, shield.current - dt);
+        pulse.current = Math.max(0, pulse.current - dt * 3);
+        invuln.current = Math.max(0, invuln.current - dt);
       }
 
-      shield.current = Math.max(0, shield.current - dt);
-      pulse.current = Math.max(0, pulse.current - dt * 3);
-      invuln.current = Math.max(0, invuln.current - dt);
-
       /* ---------------- draw ---------------- */
+      ctx.save();
+      if (deadRef.current) {
+        ctx.translate((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6);
+      }
       ctx.fillStyle = "#0d0f18";
-      ctx.fillRect(0, 0, W, H);
+      ctx.fillRect(-20, -20, W + 40, H + 40);
 
       for (let y = 0; y < ROOM_H; y++) {
         for (let x = 0; x < ROOM_W; x++) {
@@ -530,14 +691,55 @@ export function NeonDungeon() {
         }
       }
 
+      /* shop: NPC + pedestals */
+      if (cur.type === "SHOP") {
+        ctx.save();
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = "#3dff9e";
+        ctx.fillStyle = "#3dff9e";
+        ctx.fillRect(W / 2 - 14, H / 2 - 110, 28, 34);
+        ctx.restore();
+        ctx.save();
+        ctx.font = "8px 'Press Start 2P', monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#3dff9e";
+        ctx.fillText("LOJA", W / 2, H / 2 - 122);
+        for (const p of shopPeds) {
+          const def = SHOP_ITEMS.find((i) => i.id === p.item)!;
+          ctx.save();
+          ctx.globalAlpha = p.sold ? 0.2 : 1;
+          ctx.shadowBlur = 16;
+          ctx.shadowColor = def.color;
+          ctx.strokeStyle = def.color;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(p.x - 16, p.y - 16, 32, 32);
+          ctx.fillStyle = def.color;
+          ctx.fillRect(p.x - 7, p.y - 7, 14, 14);
+          ctx.restore();
+          ctx.globalAlpha = p.sold ? 0.25 : 1;
+          ctx.fillStyle = def.color;
+          ctx.fillText(p.sold ? "VENDIDO" : def.label.toUpperCase(), p.x, p.y - 26);
+          ctx.fillStyle = "#ffe23d";
+          ctx.fillText(p.sold ? "" : `${def.cost} ♪`, p.x, p.y + 34);
+          ctx.globalAlpha = 1;
+        }
+        ctx.restore();
+      }
+
       /* pickups */
       for (const p of pickups.current) {
         ctx.save();
-        ctx.shadowBlur = 18;
+        ctx.shadowBlur = 16;
         ctx.shadowColor = p.color;
         ctx.fillStyle = p.color;
         const bob = Math.sin(now / 220) * 3;
-        ctx.fillRect(p.x - 8, p.y - 8 + bob, 16, 16);
+        if (p.kind === "coin") {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y + bob, 5, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.fillRect(p.x - 8, p.y - 8 + bob, 16, 16);
+        }
         ctx.restore();
       }
 
@@ -560,7 +762,6 @@ export function NeonDungeon() {
         ctx.fillStyle = e.hitFlash > 0 ? "#ffffff" : e.color;
         ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2, e.size, e.size);
         ctx.restore();
-        // hp bar
         ctx.fillStyle = "#00000088";
         ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2 - 7, e.size, 3);
         ctx.fillStyle = e.color;
@@ -605,11 +806,17 @@ export function NeonDungeon() {
       });
       ctx.restore();
 
+      /* aim reticle */
       ctx.save();
       ctx.shadowBlur = 10;
       ctx.shadowColor = "#ffffff";
       ctx.fillStyle = "#ffffff";
-      ctx.fillRect(player.current.x - 3 + facing.current.x * 20, player.current.y - 3 + facing.current.y * 20, 6, 6);
+      ctx.fillRect(
+        player.current.x - 3 + Math.cos(aimAngle.current) * 24,
+        player.current.y - 3 + Math.sin(aimAngle.current) * 24,
+        6,
+        6,
+      );
       ctx.restore();
 
       if (shield.current > 0) {
@@ -625,24 +832,35 @@ export function NeonDungeon() {
         ctx.restore();
       }
 
+      /* death glitch */
       if (deadRef.current) {
-        ctx.save();
-        ctx.fillStyle = "rgba(5,6,11,0.8)";
-        ctx.fillRect(0, 0, W, H);
-        ctx.fillStyle = "#ff2e5b";
-        ctx.font = "24px 'Press Start 2P', monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("GAME OVER", W / 2, H / 2);
-        ctx.restore();
+        for (let i = 0; i < 14; i++) {
+          const gy = Math.random() * H;
+          const gh = 4 + Math.random() * 14;
+          ctx.globalAlpha = 0.25 + Math.random() * 0.4;
+          ctx.fillStyle = Math.random() > 0.5 ? "#ff2e5b" : "#2ec8ff";
+          ctx.fillRect((Math.random() - 0.5) * 40, gy, W, gh);
+        }
+        ctx.globalAlpha = 1;
       }
+      ctx.restore();
 
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [clearRoom, damagePlayer, enterRoom, goToFloor, mounted]);
+  }, [buy, clearRoom, damagePlayer, enterRoom, goToFloor, mounted]);
+
+  const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    mouse.current = {
+      x: ((e.clientX - rect.left) / rect.width) * W,
+      y: ((e.clientY - rect.top) / rect.height) * H,
+    };
+  };
 
   const cur = floor.rooms[roomId];
+  const inCombat = roomState === "COMBAT";
 
   if (!mounted) {
     return (
@@ -650,67 +868,108 @@ export function NeonDungeon() {
     );
   }
 
-
   return (
-    <div className="flex w-full max-w-5xl flex-col gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <div className="flex w-full max-w-5xl flex-col gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-pixel text-lg text-neon-magenta drop-shadow-[0_0_12px_rgba(255,61,240,0.6)]">
             NEON DUNGEON
           </h1>
-          <p className="mt-2 font-pixel text-[8px] leading-relaxed text-muted-foreground">
-            WASD / Setas · Andar {floor.level} · Sala {cur?.type ?? "?"} · {roomState}
+          <p className="mt-2 font-pixel text-[7px] leading-relaxed text-muted-foreground">
+            WASD move · Mouse mira · TAB/Espaço editor · P pausa · Sala {cur?.type ?? "?"} · {roomState}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex gap-1">
-            {Array.from({ length: MAX_HP }).map((_, i) => (
-              <div
-                key={i}
-                className="h-3 w-3 rounded-[2px]"
-                style={{
-                  background: i < hp ? "#ff2e5b" : "transparent",
-                  border: "1px solid #ff2e5b66",
-                  boxShadow: i < hp ? "0 0 8px #ff2e5b" : "none",
-                }}
-              />
-            ))}
-          </div>
-          {dead && (
-            <button
-              type="button"
-              onClick={restart}
-              className="rounded-sm border border-neon-red bg-neon-red/10 px-4 py-2 font-pixel text-[10px] uppercase text-neon-red"
-            >
-              Reiniciar
-            </button>
-          )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPaused((p) => !p)}
+            className="rounded-sm border border-neon-purple bg-neon-purple/10 px-3 py-2 font-pixel text-[9px] uppercase text-neon-purple"
+          >
+            {paused ? "Retomar" : "Pausar"}
+          </button>
           <button
             type="button"
             onClick={() => setRunning((x) => !x)}
-            className="rounded-sm border border-neon-cyan bg-neon-cyan/10 px-4 py-2 font-pixel text-[10px] uppercase text-neon-cyan shadow-neon-cyan transition-colors hover:bg-neon-cyan/20"
+            className="rounded-sm border border-neon-cyan bg-neon-cyan/10 px-4 py-2 font-pixel text-[9px] uppercase text-neon-cyan shadow-neon-cyan hover:bg-neon-cyan/20"
           >
             {running ? "Parar" : "Tocar"}
           </button>
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 lg:flex-row">
+      <div className="relative overflow-hidden rounded-lg border border-neon-magenta/40 shadow-neon-magenta">
         <canvas
           ref={canvasRef}
           width={W}
           height={H}
-          className="w-full flex-1 rounded-lg border border-neon-magenta/40 shadow-neon-magenta [image-rendering:pixelated]"
+          onMouseMove={onMouseMove}
+          className="block w-full [image-rendering:pixelated]"
         />
-        <Minimap floor={floor} currentId={roomId} />
-      </div>
 
-      <Sequencer
-        pattern={pattern}
-        currentStep={currentStep}
-        onToggle={toggle}
-        inventory={inventory}
-      />
+        <HUD hp={hp} maxHp={maxHp} coins={coins} floor={floor} roomId={roomId} />
+        <Sequencer pattern={pattern} currentStep={currentStep} bpm={bpm} />
+
+        {transition && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/90 font-pixel text-[10px] uppercase text-neon-cyan">
+            {transition}
+          </div>
+        )}
+
+        {paused && !dead && !editorOpen && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-background/85">
+            <p className="font-pixel text-sm uppercase text-neon-purple">Pausado</p>
+            <button
+              type="button"
+              onClick={() => setPaused(false)}
+              className="rounded-sm border border-neon-cyan px-4 py-2 font-pixel text-[9px] uppercase text-neon-cyan"
+            >
+              Retomar
+            </button>
+          </div>
+        )}
+
+        {editorOpen && !dead && (
+          <SequencerEditor
+            pattern={pattern}
+            inventory={inventory}
+            rareInventory={rareInventory}
+            bpm={bpm}
+            currentStep={currentStep}
+            onPlace={placeBlock}
+            onRemove={removeBlock}
+            onClose={() => setEditorOpen(false)}
+          />
+        )}
+
+        {dead && (
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-background/90">
+            <h2 className="font-pixel text-xl text-neon-red drop-shadow-[0_0_16px_rgba(255,46,91,0.8)]">
+              GAME OVER
+            </h2>
+            <div className="flex flex-col items-center gap-1 font-pixel text-[9px] leading-relaxed text-muted-foreground">
+              <span>Andar alcançado: B{floor.level}</span>
+              <span>Inimigos derrotados: {kills}</span>
+              <span>Notas de ouro: {coins}</span>
+              <span>
+                Música criada: {bpm} BPM · {countNotes(pattern)} notas
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={restart}
+              className="rounded-sm border border-neon-red bg-neon-red/10 px-5 py-2.5 font-pixel text-[10px] uppercase text-neon-red"
+            >
+              Reiniciar Run
+            </button>
+          </div>
+        )}
+
+        {inCombat && (
+          <div className="pointer-events-none absolute left-1/2 top-14 z-20 -translate-x-1/2 font-pixel text-[8px] uppercase text-neon-red">
+            Combate — portas trancadas
+          </div>
+        )}
+      </div>
     </div>
   );
 }
