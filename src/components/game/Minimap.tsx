@@ -1,13 +1,5 @@
 import { GRID, type Floor } from "./dungeon/generate";
 
-const TYPE_COLOR: Record<string, string> = {
-  SPAWN: "#2ec8ff",
-  NORMAL: "#4b5b86",
-  SHOP: "#ffe23d",
-  REWARD: "#3dff9e",
-  BOSS: "#b14dff",
-};
-
 export function Minimap({ floor, currentId }: { floor: Floor; currentId: string }) {
   const cells = Array.from({ length: GRID * GRID }, (_, i) => ({
     x: i % GRID,
@@ -15,33 +7,29 @@ export function Minimap({ floor, currentId }: { floor: Floor; currentId: string 
   }));
 
   return (
-    <div className="rounded-lg border border-neon-purple/40 bg-panel p-3">
-      <div className="mb-2 font-pixel text-[8px] uppercase tracking-widest text-neon-purple">
-        Andar {floor.level}
-      </div>
-      <div className="grid grid-cols-5 gap-1">
-        {cells.map(({ x, y }) => {
-          const room = floor.rooms[`${x},${y}`];
-          const active = room?.id === currentId;
-          const color = room ? TYPE_COLOR[room.type] ?? "#4b5b86" : "transparent";
-          return (
-            <div
-              key={`${x},${y}`}
-              className="h-5 w-5 rounded-[2px] border"
-              style={{
-                borderColor: room ? `${color}88` : "#ffffff10",
-                background: room
-                  ? room.state === "CLEARED"
-                    ? `${color}55`
-                    : `${color}18`
-                  : "transparent",
-                boxShadow: active ? `0 0 10px ${color}` : "none",
-                outline: active ? `1px solid ${color}` : "none",
-              }}
-            />
-          );
-        })}
-      </div>
+    <div className="grid grid-cols-5 gap-[3px] rounded-md border border-neon-cyan/30 bg-background/70 p-1.5 backdrop-blur-sm">
+      {cells.map(({ x, y }) => {
+        const room = floor.rooms[`${x},${y}`];
+        const active = room?.id === currentId;
+        const visited = room && room.state !== "UNVISITED";
+        const icon = room?.type === "SHOP" ? "$" : room?.type === "BOSS" ? "☠" : "";
+        return (
+          <div
+            key={`${x},${y}`}
+            className={`flex h-4 w-4 items-center justify-center rounded-[2px] border text-[7px] leading-none ${
+              active ? "animate-pulse" : ""
+            }`}
+            style={{
+              borderColor: room ? (active ? "#2ec8ff" : "#ffffff22") : "transparent",
+              background: room ? (active ? "#2ec8ff33" : visited ? "#8b93a833" : "#ffffff0d") : "transparent",
+              color: active ? "#2ec8ff" : "#8b93a8",
+              boxShadow: active ? "0 0 10px #2ec8ff" : "none",
+            }}
+          >
+            {icon}
+          </div>
+        );
+      })}
     </div>
   );
 }
