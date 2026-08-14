@@ -641,6 +641,13 @@ export function NeonDungeon() {
 
   const cur = floor.rooms[roomId];
 
+  if (!mounted) {
+    return (
+      <div className="h-[520px] w-full max-w-5xl rounded-lg border border-neon-magenta/30 bg-panel" />
+    );
+  }
+
+
   return (
     <div className="flex w-full max-w-5xl flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-4">
