@@ -24,7 +24,7 @@ export function Sequencer({ pattern, currentStep, onToggle }: Props) {
               {track.label}
             </div>
             <div className="grid flex-1 grid-cols-16 gap-1">
-              {pattern[t].map((on, s) => (
+              {(pattern[t] ?? []).map((on, s) => (
                 <button
                   key={s}
                   type="button"
