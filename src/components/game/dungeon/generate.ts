@@ -1,10 +1,11 @@
-import { DOOR_COLS, DOOR_ROWS, ROOM_H, ROOM_W, T } from "./tiles";
-import { ENEMY_DEFS, enemyCount, getDef, scaledDamage, scaledHp, type Enemy } from "./enemies";
+import { DOOR_COLS, DOOR_ROWS, PILLAR_HP, ROOM_H, ROOM_W, T } from "./tiles";
+import { COMMON_ENEMY_IDS, enemyCount, getDef, scaledDamage, scaledHp, type Enemy } from "./enemies";
 import { TILE } from "./tiles";
 
 export type Dir = "NORTH" | "SOUTH" | "EAST" | "WEST";
 export type RoomType = "SPAWN" | "NORMAL" | "SHOP" | "REWARD" | "BOSS";
 export type RoomState = "UNVISITED" | "COMBAT" | "CLEARED";
+export type RoomLayout = "STANDARD" | "L_SHAPE" | "T_SHAPE" | "ISLAND" | "PILLARS";
 
 export type Door = { direction: Dir; locked: boolean };
 
@@ -18,6 +19,9 @@ export type Room = {
   enemies: Enemy[];
   doors: Door[];
   rewardTaken: boolean;
+  layout: RoomLayout;
+  /** vida dos pilares destrutiveis, indexada por "tx,ty" */
+  pillars: Record<string, number>;
 };
 
 export type Floor = {
@@ -59,16 +63,81 @@ function protectedCell(x: number, y: number) {
   return DOOR_COLS.includes(x) || DOOR_ROWS.includes(y);
 }
 
+const LAYOUT_POOL: RoomLayout[] = ["STANDARD", "L_SHAPE", "T_SHAPE", "ISLAND", "PILLARS"];
+
+export const pickLayout = (type: RoomType): RoomLayout => {
+  if (type === "SHOP" || type === "SPAWN") return "STANDARD";
+  if (type === "BOSS") return Math.random() < 0.5 ? "PILLARS" : "STANDARD";
+  return LAYOUT_POOL[Math.floor(Math.random() * LAYOUT_POOL.length)]!;
+};
+
+const setTile = (tiles: number[][], x: number, y: number, id: number) => {
+  if (x < 1 || y < 1 || x > ROOM_W - 2 || y > ROOM_H - 2) return;
+  if (protectedCell(x, y)) return;
+  tiles[y]![x] = id;
+};
+
+/** Paredes internas / fossos / pilares conforme o formato da sala. */
+function applyLayout(room: Room) {
+  const tiles = room.tiles;
+  const layout = room.layout;
+
+  if (layout === "L_SHAPE") {
+    for (const y of [1, 2, 3, 6, 7, 8, 9]) setTile(tiles, 4, y, T.WALL);
+    for (const x of [1, 2, 3, 4]) setTile(tiles, x, 8, T.WALL);
+  } else if (layout === "T_SHAPE") {
+    for (const y of [1, 2, 3, 6, 7, 8, 9]) setTile(tiles, 10, y, T.WALL);
+    for (const x of [2, 3, 4, 5, 9, 10, 11, 12]) setTile(tiles, x, 2, T.WALL);
+  } else if (layout === "ISLAND") {
+    for (let y = 3; y <= ROOM_H - 4; y++)
+      for (let x = 5; x <= ROOM_W - 6; x++) tiles[y]![x] = T.CHASM;
+  } else if (layout === "PILLARS") {
+    const spots = [
+      [3, 2],
+      [10, 2],
+      [3, 7],
+      [10, 7],
+    ] as const;
+    for (const [px, py] of spots) {
+      for (let y = py; y <= py + 1; y++)
+        for (let x = px; x <= px + 1; x++) {
+          setTile(tiles, x, y, T.PILLAR);
+          if (tiles[y]?.[x] === T.PILLAR) room.pillars[`${x},${y}`] = PILLAR_HP;
+        }
+    }
+  }
+}
+
+/** Perigos ambientais e pisos ritmicos. */
 function decorate(tiles: number[][], type: RoomType) {
   if (type === "SHOP" || type === "SPAWN") return;
-  const density = type === "BOSS" ? 0.05 : 0.14;
+  const density = type === "BOSS" ? 0.05 : 0.11;
   for (let y = 1; y < ROOM_H - 1; y++) {
     for (let x = 1; x < ROOM_W - 1; x++) {
       if (protectedCell(x, y)) continue;
+      if (tiles[y]![x] !== T.FLOOR) continue;
       if (Math.random() > density) continue;
       const r = Math.random();
       tiles[y]![x] = r < 0.45 ? T.ROCK : r < 0.8 ? T.CHASM : T.SPIKE;
     }
+  }
+}
+
+/** Plataformas de BPM e piso amplificador, em manchas 2x2. */
+function paintRhythmFloors(tiles: number[][], type: RoomType) {
+  if (type === "SHOP" || type === "SPAWN") return;
+  const patches: number[] = [];
+  if (Math.random() < 0.5) patches.push(T.BPM_UP);
+  if (Math.random() < 0.4) patches.push(T.BPM_DOWN);
+  if (Math.random() < 0.35) patches.push(T.AMPLIFIER);
+  for (const id of patches) {
+    const bx = 1 + Math.floor(Math.random() * (ROOM_W - 3));
+    const by = 1 + Math.floor(Math.random() * (ROOM_H - 3));
+    for (let y = by; y <= by + 1; y++)
+      for (let x = bx; x <= bx + 1; x++) {
+        if (x < 1 || y < 1 || x > ROOM_W - 2 || y > ROOM_H - 2) continue;
+        if (tiles[y]![x] === T.FLOOR) tiles[y]![x] = id;
+      }
   }
 }
 
@@ -123,6 +192,8 @@ export function generateFloor(level: number): Floor {
       enemies: [],
       doors,
       rewardTaken: false,
+      layout: "STANDARD",
+      pillars: {},
     };
   }
 
@@ -150,7 +221,10 @@ export function generateFloor(level: number): Floor {
   if (deadEnds[1]) deadEnds[1].type = "REWARD";
 
   for (const r of Object.values(rooms)) {
+    r.layout = pickLayout(r.type);
+    applyLayout(r);
     decorate(r.tiles, r.type);
+    paintRhythmFloors(r.tiles, r.type);
     carveDoors(r);
     if (r.type !== "SPAWN" && r.type !== "SHOP") r.enemies = spawnEnemies(r, level);
   }
@@ -173,11 +247,15 @@ function makeEnemy(defId: string, x: number, y: number, level: number, boss = fa
     speed: def.speed * 26,
     behavior: def.behavior,
     color: def.color,
-    size: boss ? 64 : 26,
+    size: boss ? 64 : def.id === "infected_speaker" ? 42 : def.id === "bass_dropper" ? 36 : 26,
     cooldown: def.fireRate ?? 1.6,
     spawnT: 0.5,
     hitFlash: 0,
     spikeT: 0,
+    stun: 0,
+    steps: 0,
+    lock: null,
+    vamp: 0,
   };
 }
 
@@ -199,12 +277,19 @@ export function spawnEnemies(room: Room, level: number): Enemy[] {
   }
 
   const n = Math.min(enemyCount(level), spots.length);
-  const pool = ENEMY_DEFS.filter((d) => d.behavior !== "BOSS_PATTERN_WAVES_AND_PROJECTILES");
   const out: Enemy[] = [];
-  for (let i = 0; i < n; i++) {
+
+  /* Caixa de Som Infectada: estrutura que invoca inimigos ate ser destruida */
+  if (room.type === "NORMAL" && Math.random() < 0.3 && spots.length) {
     const s = spots.splice(Math.floor(Math.random() * spots.length), 1)[0]!;
-    const def = pool[Math.floor(Math.random() * pool.length)]!;
-    out.push(makeEnemy(def.id, s.x, s.y, level));
+    out.push(makeEnemy("infected_speaker", s.x, s.y, level));
+  }
+
+  for (let i = 0; i < n; i++) {
+    if (!spots.length) break;
+    const s = spots.splice(Math.floor(Math.random() * spots.length), 1)[0]!;
+    const id = COMMON_ENEMY_IDS[Math.floor(Math.random() * COMMON_ENEMY_IDS.length)]!;
+    out.push(makeEnemy(id, s.x, s.y, level));
   }
   return out;
 }

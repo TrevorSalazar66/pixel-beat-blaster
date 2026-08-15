@@ -16,11 +16,24 @@ export const TRACKS: Track[] = [
 
 export const STEPS = 16;
 
+/** 0 = Base, 1 = Variacao A, 2 = Variacao B */
+export type Variant = 0 | 1 | 2;
+
 /** A step slot: empty (null) or holding a sound block. */
-export type Cell = null | { rare: boolean };
+export type Cell = null | { rare: boolean; variant: Variant };
 export type Pattern = Cell[][];
 
-const b = (rare = false): Cell => ({ rare });
+/** Nomes das variacoes por trilha (indice = Variant). */
+export const VARIANTS: Record<TrackId, [string, string, string]> = {
+  kick: ["Kick", "Sub-Kick", "Explosive Kick"],
+  snare: ["Snare", "Shield Snare", "Stun Snare"],
+  hat: ["Hi-Hat", "Dash Hat", "Homing Hat"],
+  synth: ["Synth", "Beam Synth", "Vamp Bass"],
+};
+
+export const VARIANT_TAG = ["", "A", "B"] as const;
+
+const b = (rare = false, variant: Variant = 0): Cell => ({ rare, variant });
 const _ = null;
 
 export const createPattern = (): Pattern => [

@@ -10,6 +10,10 @@ export const T = {
   SPIKE: 4,
   DOOR: 5,
   PORTAL: 6,
+  PILLAR: 7,
+  BPM_UP: 8,
+  BPM_DOWN: 9,
+  AMPLIFIER: 10,
 } as const;
 
 export type TileId = (typeof T)[keyof typeof T];
@@ -32,7 +36,14 @@ export const TILE_PROPS: Record<number, TileProps> = {
   [T.SPIKE]: { id: T.SPIKE, name: "Espinho", solid: false, blocksShots: false, color: "#1a1420" },
   [T.DOOR]: { id: T.DOOR, name: "Porta", solid: false, blocksShots: false, color: "#101828" },
   [T.PORTAL]: { id: T.PORTAL, name: "Portal", solid: false, blocksShots: false, color: "#160b24" },
+  [T.PILLAR]: { id: T.PILLAR, name: "Pilar", solid: true, blocksShots: true, color: "#2b2f4d" },
+  [T.BPM_UP]: { id: T.BPM_UP, name: "Piso Acelerador", solid: false, blocksShots: false, color: "#2a1420" },
+  [T.BPM_DOWN]: { id: T.BPM_DOWN, name: "Piso Desacelerador", solid: false, blocksShots: false, color: "#101c2a" },
+  [T.AMPLIFIER]: { id: T.AMPLIFIER, name: "Piso Amplificador", solid: false, blocksShots: false, color: "#241a2e" },
 };
+
+/** Pilares destrutiveis comecam com esta vida. */
+export const PILLAR_HP = 12;
 
 export const DOOR_COLS = [6, 7];
 export const DOOR_ROWS = [4, 5];

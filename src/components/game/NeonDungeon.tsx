@@ -10,8 +10,8 @@ import { useHudLayout } from "@/hooks/useHudLayout";
 import { Sequencer } from "./Sequencer";
 import { SequencerEditor } from "./SequencerEditor";
 import { HUD } from "./HUD";
-import { STEPS, TRACKS, countNotes, createPattern, type Pattern } from "./tracks";
-import { ROOM_H, ROOM_W, TILE, TILE_PROPS, T } from "./dungeon/tiles";
+import { STEPS, TRACKS, countNotes, createPattern, type Pattern, type Variant } from "./tracks";
+import { PILLAR_HP, ROOM_H, ROOM_W, TILE, TILE_PROPS, T } from "./dungeon/tiles";
 import {
   dirDelta,
   generateFloor,
@@ -22,6 +22,7 @@ import {
   type Room,
 } from "./dungeon/generate";
 import { rollBlock } from "./dungeon/drops";
+import { COMMON_ENEMY_IDS, getDef, scaledDamage, scaledHp } from "./dungeon/enemies";
 import { SHOP_ITEMS, type ShopItemId } from "./dungeon/shop";
 
 const W = ROOM_W * TILE;
@@ -35,8 +36,26 @@ type Shot = {
   x: number; y: number; vx: number; vy: number; life: number;
   color: string; r: number; dmg: number; hostile: boolean; pierce: boolean;
   hit?: Set<string>;
+  /** empurra o inimigo atingido (px) */
+  knock?: number;
+  /** explode em area ao impactar */
+  explode?: boolean;
+  /** persegue o inimigo mais proximo */
+  homing?: number;
 };
-type Blast = { x: number; y: number; t: number; hit: Set<string> };
+type Blast = {
+  x: number; y: number; t: number; hit: Set<string>;
+  hostile?: boolean;
+  dmg?: number;
+  speed?: number;
+  maxT?: number;
+  color?: string;
+  stun?: number;
+};
+/** Poca de som: dano continuo em area (Synth base). */
+type Pool = { x: number; y: number; r: number; t: number; life: number; dmg: number; tick: number };
+/** Feixe laser continuo (Beam Synth). */
+type Beam = { x: number; y: number; a: number; t: number; life: number; dmg: number; tick: number };
 type Pickup = { x: number; y: number; kind: "block" | "coin"; track?: TrackId; color: string };
 type Pedestal = { x: number; y: number; item: ShopItemId; sold: boolean };
 
@@ -46,7 +65,8 @@ export function NeonDungeon() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [pattern, setPattern] = useState<Pattern>(createPattern);
   const [currentStep, setCurrentStep] = useState(-1);
-  const [running, setRunning] = useState(false);
+  const [running, setRunning] = useState(true);
+  const [bpmMod, setBpmMod] = useState(0);
   const [paused, setPaused] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [inventory, setInventory] = useState<Record<TrackId, number>>(emptyInv);
@@ -79,7 +99,9 @@ export function NeonDungeon() {
   touchRef.current = touchMode === true;
   const fireCd = useRef(0);
   const bpmRef = useRef(bpm);
-  bpmRef.current = bpm;
+  bpmRef.current = bpm + bpmMod;
+  const bpmModRef = useRef(0);
+  bpmModRef.current = bpmMod;
 
   useEffect(() => {
     const d = detectDevice();
@@ -116,6 +138,11 @@ export function NeonDungeon() {
   const blasts = useRef<Blast[]>([]);
   const pickups = useRef<Pickup[]>([]);
   const pedestals = useRef<Record<string, Pedestal[]>>({});
+  const pools = useRef<Pool[]>([]);
+  const beams = useRef<Beam[]>([]);
+  const dash = useRef({ x: 0, y: 0, t: 0 });
+  const lastMove = useRef({ x: 0, y: 0 });
+  const vamp = useRef(0);
   const shield = useRef(0);
   const pulse = useRef(0);
   const invuln = useRef(0);
@@ -126,7 +153,7 @@ export function NeonDungeon() {
 
   /* ---------- editor actions ---------- */
   const placeBlock = useCallback(
-    (t: number, s: number, block: { track: TrackId; rare: boolean }) => {
+    (t: number, s: number, block: { track: TrackId; rare: boolean; variant: Variant }) => {
       const prev = patternRef.current[t]?.[s] ?? null;
       const setInv = block.rare ? setRareInventory : setInventory;
       setInv((inv) => ({ ...inv, [block.track]: Math.max(0, (inv[block.track] ?? 0) - 1) }));
@@ -136,7 +163,11 @@ export function NeonDungeon() {
         back((inv) => ({ ...inv, [trackId]: (inv[trackId] ?? 0) + 1 }));
       }
       setPattern((p) =>
-        p.map((row, i) => (i === t ? row.map((c, j) => (j === s ? { rare: block.rare } : c)) : row)),
+        p.map((row, i) =>
+          i === t
+            ? row.map((c, j) => (j === s ? { rare: block.rare, variant: block.variant } : c))
+            : row,
+        ),
       );
     },
     [],
@@ -149,6 +180,18 @@ export function NeonDungeon() {
     const back = prev.rare ? setRareInventory : setInventory;
     back((inv) => ({ ...inv, [trackId]: (inv[trackId] ?? 0) + 1 }));
     setPattern((p) => p.map((row, i) => (i === t ? row.map((c, j) => (j === s ? null : c)) : row)));
+  }, []);
+
+  const cycleVariant = useCallback((t: number, s: number) => {
+    setPattern((p) =>
+      p.map((row, i) =>
+        i === t
+          ? row.map((c, j) =>
+              j === s && c ? { ...c, variant: (((c.variant + 1) % 3) as Variant) } : c,
+            )
+          : row,
+      ),
+    );
   }, []);
 
   /* ---------- helpers ---------- */
@@ -173,6 +216,20 @@ export function NeonDungeon() {
   };
 
   const bump = () => setFloor((f) => ({ ...f }));
+
+  /** Pilares destrutiveis absorvem dano ate serem destruidos. */
+  const hitPillar = (r: Room, px: number, py: number, dmg: number) => {
+    const tx = Math.floor(px / TILE);
+    const ty = Math.floor(py / TILE);
+    if (r.tiles[ty]?.[tx] !== T.PILLAR) return false;
+    const k = `${tx},${ty}`;
+    const left = (r.pillars[k] ?? PILLAR_HP) - dmg;
+    if (left <= 0) {
+      delete r.pillars[k];
+      r.tiles[ty]![tx] = T.FLOOR;
+    } else r.pillars[k] = left;
+    return true;
+  };
 
   const damagePlayer = useCallback((amount: number) => {
     if (invuln.current > 0 || deadRef.current) return;
@@ -321,41 +378,135 @@ export function NeonDungeon() {
     playTrack("synth");
   }, []);
 
-  /* ---- sequencer actions ---- */
-  const fire = useCallback((trackIndex: number, rare: boolean) => {
+  /* ---- sequencer actions: cada bloco dispara seu efeito a partir do personagem ---- */
+  const fire = useCallback((trackIndex: number, rare: boolean, variant: Variant = 0) => {
     const track = TRACKS[trackIndex];
     if (!track || frozenRef.current) return;
     const cx = player.current.x;
     const cy = player.current.y;
     const a = aimAngle.current;
     const f = { x: Math.cos(a), y: Math.sin(a) };
+    const r = room();
+
+    /* Piso Amplificador: dobra tamanho e dano dos projeteis */
+    const amp = tileAt(r, cx, cy) === T.AMPLIFIER;
+    const dMul = (rare ? 1.35 : 1) * (amp ? 2 : 1);
+    const sMul = amp ? 2 : 1;
+    const stepDur = 60 / Math.max(30, bpmRef.current) / 4;
+
+    const shoot = (opts: Partial<Shot> & { vx: number; vy: number }) => {
+      shots.current.push({
+        x: cx,
+        y: cy,
+        life: 2,
+        color: rare ? "#ffffff" : track.color,
+        r: 6 * sMul,
+        dmg: 6 * dMul,
+        hostile: false,
+        pierce: rare,
+        hit: new Set<string>(),
+        ...opts,
+      } as Shot);
+    };
 
     if (track.id === "kick") {
-      const spread = rare ? [-0.12, 0.12] : [0];
-      for (const off of spread) {
-        shots.current.push({
-          x: cx, y: cy,
-          vx: Math.cos(a + off) * 300, vy: Math.sin(a + off) * 300,
-          life: 2, color: rare ? "#ffffff" : track.color, r: 8, dmg: 8,
-          hostile: false, pierce: rare, hit: new Set(),
+      /* Acoes ofensivas diretas */
+      if (variant === 1) {
+        // Sub-Kick: disparo duplo rapido de menor dano
+        for (const off of [-0.07, 0.07])
+          shoot({
+            vx: Math.cos(a + off) * 420,
+            vy: Math.sin(a + off) * 420,
+            r: 5 * sMul,
+            dmg: 5 * dMul,
+            life: 1.6,
+            knock: 8,
+          });
+      } else if (variant === 2) {
+        // Explosive Kick: explode em area ao impactar
+        shoot({
+          vx: f.x * 280,
+          vy: f.y * 280,
+          r: 9 * sMul,
+          dmg: 7 * dMul,
+          explode: true,
+          pierce: false,
+        });
+      } else {
+        // Base: projetil pesado com knockback
+        shoot({
+          vx: f.x * 300,
+          vy: f.y * 300,
+          r: 8 * sMul,
+          dmg: 12 * dMul,
+          knock: 46,
         });
       }
       pulse.current = 1;
-    } else if (track.id === "hat") {
-      const offs = rare ? [-0.35, -0.12, 0.12, 0.35] : [-0.25, 0, 0.25];
-      for (const off of offs) {
-        shots.current.push({
-          x: cx, y: cy,
-          vx: Math.cos(a + off) * 720, vy: Math.sin(a + off) * 720,
-          life: 1.2, color: rare ? "#ffffff" : track.color, r: 3.5, dmg: rare ? 3 : 2,
-          hostile: false, pierce: rare, hit: new Set(),
-        });
+      return;
+    }
+
+    if (track.id === "hat") {
+      /* Velocidade e projecao rapida */
+      if (variant === 1) {
+        // Dash Hat: impulso curto na direcao do movimento
+        const mv = lastMove.current;
+        const len = Math.hypot(mv.x, mv.y);
+        const dx = len > 0.05 ? mv.x / len : f.x;
+        const dy = len > 0.05 ? mv.y / len : f.y;
+        dash.current = { x: dx, y: dy, t: 0.16 };
+        invuln.current = Math.max(invuln.current, 0.16);
+      } else if (variant === 2) {
+        // Homing Hat: 2 projeteis teleguiados
+        for (const off of [-0.25, 0.25])
+          shoot({
+            vx: Math.cos(a + off) * 460,
+            vy: Math.sin(a + off) * 460,
+            r: 4 * sMul,
+            dmg: 3 * dMul,
+            life: 2.2,
+            homing: 6,
+          });
+      } else {
+        // Base: leque triplo rapido
+        for (const off of [-0.25, 0, 0.25])
+          shoot({
+            vx: Math.cos(a + off) * 720,
+            vy: Math.sin(a + off) * 720,
+            r: 3.5 * sMul,
+            dmg: 2 * dMul,
+            life: 1.2,
+          });
       }
-    } else if (track.id === "snare") {
-      shield.current = rare ? 0.9 : 0.5;
-      blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set() });
-      shots.current = shots.current.filter((s) => !s.hostile);
-      const r = room();
+      return;
+    }
+
+    if (track.id === "snare") {
+      /* Defensivo e controle de grupo */
+      if (variant === 1) {
+        // Shield Snare: 0.5s de invulnerabilidade total
+        shield.current = Math.max(shield.current, 0.5);
+        invuln.current = Math.max(invuln.current, 0.5);
+        blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set(), color: "#2ec8ff", dmg: 0 });
+        return;
+      }
+      if (variant === 2) {
+        // Stun Snare: paralisa em raio curto por 1.5s
+        blasts.current.push({
+          x: cx, y: cy, t: 0, hit: new Set(),
+          color: "#8ad8ff", dmg: 1, speed: 150, maxT: 0.55, stun: 1.5,
+        });
+        for (const e of r.enemies) {
+          if (Math.hypot(e.x - cx, e.y - cy) < 110) e.stun = Math.max(e.stun, 1.5);
+        }
+        return;
+      }
+      // Base: pulso de repulsao + anula projeteis inimigos proximos
+      shield.current = Math.max(shield.current, 0.25);
+      blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set(), color: "#2ec8ff", dmg: 3 });
+      shots.current = shots.current.filter(
+        (sh) => !sh.hostile || Math.hypot(sh.x - cx, sh.y - cy) > 170,
+      );
       for (const e of r.enemies) {
         const dx = e.x - cx;
         const dy = e.y - cy;
@@ -365,17 +516,97 @@ export function NeonDungeon() {
           e.y += (dy / d) * 46;
         }
       }
-    } else {
-      blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set() });
-      if (rare) blasts.current.push({ x: cx + f.x * 70, y: cy + f.y * 70, t: 0, hit: new Set() });
+      return;
+    }
+
+    /* synth / bass: area e modificadores */
+    if (variant === 1) {
+      // Beam Synth: feixe continuo durante o step
+      beams.current.push({
+        x: cx, y: cy, a, t: 0,
+        life: Math.max(0.12, stepDur),
+        dmg: 4 * dMul,
+        tick: 0,
+      });
+      return;
+    }
+    if (variant === 2) {
+      // Vamp Bass: janela de cura ao derrotar inimigos sob o som
+      vamp.current = 2;
+      pools.current.push({
+        x: cx, y: cy, r: 70 * sMul, t: 0, life: 2, dmg: 1.5 * dMul, tick: 0,
+      });
+      return;
+    }
+    // Base: poca de som no chao por 2s
+    pools.current.push({
+      x: cx + f.x * 40, y: cy + f.y * 40,
+      r: 62 * sMul, t: 0, life: 2, dmg: 3 * dMul, tick: 0,
+    });
+  }, []);
+
+  /* ---- passo do sequenciador: inimigos ritmicos ---- */
+  const handleStep = useCallback(() => {
+    const r = room();
+    if (frozenRef.current) return;
+    for (const e of r.enemies) {
+      if (e.spawnT > 0 || e.stun > 0) continue;
+      e.steps += 1;
+      if (e.behavior === "LASER_SNIPER_LOCK") {
+        if (e.steps % 4 === 0) {
+          const target = e.lock ?? { x: player.current.x, y: player.current.y };
+          const dx = target.x - e.x;
+          const dy = target.y - e.y;
+          const d = Math.hypot(dx, dy) || 1;
+          shots.current.push({
+            x: e.x, y: e.y,
+            vx: (dx / d) * 900, vy: (dy / d) * 900,
+            life: 1.4, color: "#ff2e5b", r: 4, dmg: e.damage,
+            hostile: true, pierce: false,
+          });
+          e.lock = null;
+        } else {
+          e.lock = { x: player.current.x, y: player.current.y };
+        }
+      }
+      if (e.behavior === "INFECTED_SPEAKER_SPAWNER" && e.steps % 4 === 0) {
+        if (r.enemies.length < 16) {
+          const id = COMMON_ENEMY_IDS[Math.floor(Math.random() * COMMON_ENEMY_IDS.length)]!;
+          const def = getDef(id);
+          const lvl = floorRef.current.level;
+          const hp = scaledHp(def.hpBase, lvl);
+          const ang = Math.random() * Math.PI * 2;
+          r.enemies.push({
+            uid: `s${Math.random().toString(36).slice(2, 9)}`,
+            defId: def.id,
+            x: e.x + Math.cos(ang) * 46,
+            y: e.y + Math.sin(ang) * 46,
+            hp,
+            maxHp: hp,
+            damage: scaledDamage(def.damageBase, lvl),
+            speed: def.speed * 26,
+            behavior: def.behavior,
+            color: def.color,
+            size: def.id === "bass_dropper" ? 36 : 26,
+            cooldown: def.fireRate ?? 1.6,
+            spawnT: 0.5,
+            hitFlash: 0,
+            spikeT: 0,
+            stun: 0,
+            steps: 0,
+            lock: null,
+            vamp: 0,
+          });
+        }
+      }
     }
   }, []);
 
   /* ---- audio clock ---- */
   useEffect(() => {
-    if (!running || paused || editorOpen || dead || settingsOpen || hudEditing || transition) return;
+    if (!running || paused || dead || transition) return;
     const ac = getAudio();
-    const stepDur = 60 / bpm / 4 / settings.gameSpeed;
+    const stepDur = 60 / (bpm + bpmMod) / 4 / settings.gameSpeed;
     let next = ac.currentTime + 0.1;
     let step = 0;
     let raf = 0;
@@ -393,9 +624,10 @@ export function NeonDungeon() {
           window.setTimeout(
             () => {
               setCurrentStep(s);
+              handleStep();
               patternRef.current.forEach((row, t) => {
                 const cell = row[s];
-                if (cell) fire(t, cell.rare);
+                if (cell) fire(t, cell.rare, cell.variant);
               });
             },
             Math.max(0, (when - ac.currentTime) * 1000),
@@ -412,18 +644,7 @@ export function NeonDungeon() {
       timers.forEach(clearTimeout);
       setCurrentStep(-1);
     };
-  }, [
-    running,
-    fire,
-    bpm,
-    paused,
-    editorOpen,
-    dead,
-    transition,
-    settingsOpen,
-    hudEditing,
-    settings.gameSpeed,
-  ]);
+  }, [running, fire, handleStep, bpm, bpmMod, paused, dead, transition, settings.gameSpeed]);
 
   /* ---- simulation + render ---- */
   useEffect(() => {
@@ -483,9 +704,20 @@ export function NeonDungeon() {
         }
       }
       if (dx || dy) {
+        const l0 = Math.hypot(dx, dy);
+        lastMove.current = { x: dx / l0, y: dy / l0 };
+      }
+      /* Dash Hat: impulso curto */
+      if (dash.current.t > 0) {
+        dash.current.t = Math.max(0, dash.current.t - rawDt);
+        dx += dash.current.x * 3.2;
+        dy += dash.current.y * 3.2;
+      }
+      if (dx || dy) {
         const len = Math.hypot(dx, dy);
-        dx /= len;
-        dy /= len;
+        const boost = Math.min(3.4, len);
+        dx = (dx / len) * boost;
+        dy = (dy / len) * boost;
         const half = SIZE / 2 - 3;
         const nx = player.current.x + dx * SPEED * dt;
         const ny = player.current.y + dy * SPEED * dt;
@@ -500,6 +732,14 @@ export function NeonDungeon() {
       if (!frozen) {
         /* spikes */
         const under = tileAt(r, player.current.x, player.current.y);
+
+        /* Plataformas de BPM: aceleram / desaceleram a musica */
+        const targetMod = under === T.BPM_UP ? 20 : under === T.BPM_DOWN ? -20 : 0;
+        if (targetMod !== bpmModRef.current) {
+          bpmModRef.current = targetMod;
+          setBpmMod(targetMod);
+        }
+
         if (under === T.SPIKE) {
           spikeT.current += dt;
           if (spikeT.current >= 1.5) {
@@ -576,20 +816,38 @@ export function NeonDungeon() {
       /* enemies */
       const cur = room();
       if (!frozen) {
+        /* Siren: aura de velocidade para os outros inimigos da sala */
+        const sirens = cur.enemies.filter(
+          (e) => e.behavior === "SIREN_SPEED_AURA" && e.spawnT <= 0 && e.stun <= 0,
+        ).length;
+        const auraMul = 1 + Math.min(0.6, sirens * 0.3);
+
         for (const e of cur.enemies) {
           if (e.spawnT > 0) {
             e.spawnT -= dt;
             continue;
           }
           e.hitFlash = Math.max(0, e.hitFlash - dt);
+          e.vamp = Math.max(0, e.vamp - dt);
+          if (e.stun > 0) {
+            e.stun -= dt;
+            continue;
+          }
+          const spd = e.behavior === "SIREN_SPEED_AURA" ? 1 : auraMul;
           const flying = e.behavior === "FLY_IGNORES_CHASMS";
           const ex = player.current.x - e.x;
           const ey = player.current.y - e.y;
           const dist = Math.hypot(ex, ey) || 1;
 
-          if (e.behavior === "RUSH_PLAYER" || flying || e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
-            const nx = e.x + (ex / dist) * e.speed * dt;
-            const ny = e.y + (ey / dist) * e.speed * dt;
+          if (
+            e.behavior === "RUSH_PLAYER" ||
+            flying ||
+            e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES" ||
+            e.behavior === "BASS_DROP_SHOCKWAVE" ||
+            e.behavior === "SIREN_SPEED_AURA"
+          ) {
+            const nx = e.x + (ex / dist) * e.speed * spd * dt;
+            const ny = e.y + (ey / dist) * e.speed * spd * dt;
             if (!solidFor(cur, nx, e.y, flying)) e.x = nx;
             if (!solidFor(cur, e.x, ny, flying)) e.y = ny;
           }
@@ -609,6 +867,18 @@ export function NeonDungeon() {
             }
           }
 
+          /* Bass-Dropper: onda de choque circular ao se aproximar */
+          if (e.behavior === "BASS_DROP_SHOCKWAVE") {
+            e.cooldown -= dt;
+            if (e.cooldown <= 0 && dist < 190) {
+              e.cooldown = 2.6;
+              blasts.current.push({
+                x: e.x, y: e.y, t: 0, hit: new Set(),
+                hostile: true, dmg: e.damage, speed: 260, maxT: 0.6, color: "#ff6a00",
+              });
+            }
+          }
+
           if (tileAt(cur, e.x, e.y) === T.SPIKE && !flying) {
             e.spikeT += dt;
             if (e.spikeT >= 1.5) {
@@ -618,16 +888,53 @@ export function NeonDungeon() {
             }
           }
 
-          if (dist < e.size / 2 + SIZE / 2 && shield.current <= 0) damagePlayer(e.damage);
+          if (
+            e.behavior !== "INFECTED_SPEAKER_SPAWNER" &&
+            e.behavior !== "LASER_SNIPER_LOCK" &&
+            dist < e.size / 2 + SIZE / 2 &&
+            shield.current <= 0
+          )
+            damagePlayer(e.damage);
         }
 
         /* shots */
         shots.current = shots.current.filter((s) => {
+          /* Homing Hat: curva a rota para o inimigo mais proximo */
+          if (s.homing) {
+            let best: { x: number; y: number } | null = null;
+            let bd = Infinity;
+            for (const e of cur.enemies) {
+              if (e.spawnT > 0) continue;
+              const d = Math.hypot(e.x - s.x, e.y - s.y);
+              if (d < bd) {
+                bd = d;
+                best = e;
+              }
+            }
+            if (best) {
+              const sp = Math.hypot(s.vx, s.vy) || 1;
+              const tx = (best.x - s.x) / (bd || 1);
+              const ty = (best.y - s.y) / (bd || 1);
+              const nvx = s.vx / sp + tx * s.homing * dt;
+              const nvy = s.vy / sp + ty * s.homing * dt;
+              const nl = Math.hypot(nvx, nvy) || 1;
+              s.vx = (nvx / nl) * sp;
+              s.vy = (nvy / nl) * sp;
+            }
+          }
           s.x += s.vx * dt;
           s.y += s.vy * dt;
           s.life -= dt;
           if (s.life <= 0) return false;
-          if (blocksShot(cur, s.x, s.y)) return false;
+          if (blocksShot(cur, s.x, s.y)) {
+            if (!s.hostile) hitPillar(cur, s.x, s.y, s.dmg);
+            if (s.explode)
+              blasts.current.push({
+                x: s.x, y: s.y, t: 0, hit: new Set(),
+                dmg: s.dmg * 1.5, speed: 300, maxT: 0.4, color: s.color,
+              });
+            return false;
+          }
           if (s.hostile) {
             if (shield.current > 0) return false;
             if (Math.hypot(s.x - player.current.x, s.y - player.current.y) < SIZE / 2 + s.r) {
@@ -641,6 +948,20 @@ export function NeonDungeon() {
               if (Math.hypot(s.x - e.x, s.y - e.y) < e.size / 2 + s.r) {
                 e.hp -= s.dmg;
                 e.hitFlash = 0.15;
+                if (s.knock) {
+                  const sp = Math.hypot(s.vx, s.vy) || 1;
+                  const kx = e.x + (s.vx / sp) * s.knock;
+                  const ky = e.y + (s.vy / sp) * s.knock;
+                  if (!solidFor(cur, kx, e.y, true)) e.x = kx;
+                  if (!solidFor(cur, e.x, ky, true)) e.y = ky;
+                }
+                if (s.explode) {
+                  blasts.current.push({
+                    x: s.x, y: s.y, t: 0, hit: new Set(),
+                    dmg: s.dmg * 1.5, speed: 300, maxT: 0.4, color: s.color,
+                  });
+                  return false;
+                }
                 if (!s.pierce) return false;
                 s.hit?.add(e.uid);
               }
@@ -652,22 +973,88 @@ export function NeonDungeon() {
         /* blasts */
         blasts.current = blasts.current.filter((b) => {
           b.t += dt;
-          const rad = b.t * 260;
-          for (const e of cur.enemies) {
-            if (e.spawnT > 0 || b.hit.has(e.uid)) continue;
-            if (Math.hypot(e.x - b.x, e.y - b.y) < rad) {
-              b.hit.add(e.uid);
-              e.hp -= 4;
-              e.hitFlash = 0.15;
+          const speed = b.speed ?? 260;
+          const maxT = b.maxT ?? 0.45;
+          const rad = b.t * speed;
+          if (b.hostile) {
+            if (
+              !b.hit.has("player") &&
+              shield.current <= 0 &&
+              Math.hypot(player.current.x - b.x, player.current.y - b.y) < rad
+            ) {
+              b.hit.add("player");
+              damagePlayer(b.dmg ?? 1);
+            }
+          } else {
+            for (const e of cur.enemies) {
+              if (e.spawnT > 0 || b.hit.has(e.uid)) continue;
+              if (Math.hypot(e.x - b.x, e.y - b.y) < rad) {
+                b.hit.add(e.uid);
+                e.hp -= b.dmg ?? 4;
+                e.hitFlash = 0.15;
+                if (b.stun) e.stun = Math.max(e.stun, b.stun);
+              }
             }
           }
-          return b.t < 0.45;
+          return b.t < maxT;
         });
+
+        /* pocas de som: dano continuo em area */
+        pools.current = pools.current.filter((pl) => {
+          pl.t += dt;
+          pl.tick += dt;
+          if (pl.tick >= 0.25) {
+            pl.tick = 0;
+            for (const e of cur.enemies) {
+              if (e.spawnT > 0) continue;
+              if (Math.hypot(e.x - pl.x, e.y - pl.y) < pl.r + e.size / 2) {
+                e.hp -= pl.dmg;
+                e.hitFlash = 0.1;
+                if (vamp.current > 0) e.vamp = 1.2;
+              }
+            }
+          }
+          return pl.t < pl.life;
+        });
+
+        /* feixes laser continuos */
+        beams.current = beams.current.filter((bm) => {
+          bm.t += dt;
+          bm.tick += dt;
+          if (bm.tick >= 0.12) {
+            bm.tick = 0;
+            const dirx = Math.cos(bm.a);
+            const diry = Math.sin(bm.a);
+            for (let d = 12; d < 1200; d += 12) {
+              const bx = bm.x + dirx * d;
+              const by = bm.y + diry * d;
+              if (blocksShot(cur, bx, by)) {
+                hitPillar(cur, bx, by, bm.dmg);
+                break;
+              }
+              for (const e of cur.enemies) {
+                if (e.spawnT > 0) continue;
+                if (Math.hypot(e.x - bx, e.y - by) < e.size / 2 + 8) {
+                  e.hp -= bm.dmg;
+                  e.hitFlash = 0.1;
+                  if (vamp.current > 0) e.vamp = 1.2;
+                }
+              }
+            }
+          }
+          return bm.t < bm.life;
+        });
+
+        vamp.current = Math.max(0, vamp.current - dt);
 
         /* deaths + coins + room clear */
         const dying = cur.enemies.filter((e) => e.hp <= 0);
         if (dying.length) {
           for (const e of dying) {
+            /* Vamp Bass: 10% de chance de restaurar 1 HP */
+            if ((e.vamp > 0 || vamp.current > 0) && Math.random() < 0.1) {
+              setHp((h) => Math.min(h + 1, maxHpRef.current));
+            }
             const n = e.size > 40 ? 12 : 1 + Math.floor(Math.random() * 3);
             for (let i = 0; i < n; i++) {
               pickups.current.push({
