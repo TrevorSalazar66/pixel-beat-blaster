@@ -802,20 +802,38 @@ export function NeonDungeon() {
       /* enemies */
       const cur = room();
       if (!frozen) {
+        /* Siren: aura de velocidade para os outros inimigos da sala */
+        const sirens = cur.enemies.filter(
+          (e) => e.behavior === "SIREN_SPEED_AURA" && e.spawnT <= 0 && e.stun <= 0,
+        ).length;
+        const auraMul = 1 + Math.min(0.6, sirens * 0.3);
+
         for (const e of cur.enemies) {
           if (e.spawnT > 0) {
             e.spawnT -= dt;
             continue;
           }
           e.hitFlash = Math.max(0, e.hitFlash - dt);
+          e.vamp = Math.max(0, e.vamp - dt);
+          if (e.stun > 0) {
+            e.stun -= dt;
+            continue;
+          }
+          const spd = e.behavior === "SIREN_SPEED_AURA" ? 1 : auraMul;
           const flying = e.behavior === "FLY_IGNORES_CHASMS";
           const ex = player.current.x - e.x;
           const ey = player.current.y - e.y;
           const dist = Math.hypot(ex, ey) || 1;
 
-          if (e.behavior === "RUSH_PLAYER" || flying || e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
-            const nx = e.x + (ex / dist) * e.speed * dt;
-            const ny = e.y + (ey / dist) * e.speed * dt;
+          if (
+            e.behavior === "RUSH_PLAYER" ||
+            flying ||
+            e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES" ||
+            e.behavior === "BASS_DROP_SHOCKWAVE" ||
+            e.behavior === "SIREN_SPEED_AURA"
+          ) {
+            const nx = e.x + (ex / dist) * e.speed * spd * dt;
+            const ny = e.y + (ey / dist) * e.speed * spd * dt;
             if (!solidFor(cur, nx, e.y, flying)) e.x = nx;
             if (!solidFor(cur, e.x, ny, flying)) e.y = ny;
           }
@@ -835,6 +853,18 @@ export function NeonDungeon() {
             }
           }
 
+          /* Bass-Dropper: onda de choque circular ao se aproximar */
+          if (e.behavior === "BASS_DROP_SHOCKWAVE") {
+            e.cooldown -= dt;
+            if (e.cooldown <= 0 && dist < 190) {
+              e.cooldown = 2.6;
+              blasts.current.push({
+                x: e.x, y: e.y, t: 0, hit: new Set(),
+                hostile: true, dmg: e.damage, speed: 260, maxT: 0.6, color: "#ff6a00",
+              });
+            }
+          }
+
           if (tileAt(cur, e.x, e.y) === T.SPIKE && !flying) {
             e.spikeT += dt;
             if (e.spikeT >= 1.5) {
@@ -844,7 +874,13 @@ export function NeonDungeon() {
             }
           }
 
-          if (dist < e.size / 2 + SIZE / 2 && shield.current <= 0) damagePlayer(e.damage);
+          if (
+            e.behavior !== "INFECTED_SPEAKER_SPAWNER" &&
+            e.behavior !== "LASER_SNIPER_LOCK" &&
+            dist < e.size / 2 + SIZE / 2 &&
+            shield.current <= 0
+          )
+            damagePlayer(e.damage);
         }
 
         /* shots */
