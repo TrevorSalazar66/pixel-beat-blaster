@@ -64,6 +64,35 @@ export function NeonDungeon() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  /* ---------- mobile / touch (Módulo 4) ---------- */
+  const [touchMode, setTouchMode] = useState<boolean | null>(null);
+  const [askDevice, setAskDevice] = useState(false);
+  const orientation = useOrientation();
+  const { settings, update: updateSettings } = useGameSettings();
+  const hudLayout = useHudLayout(orientation);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hudEditing, setHudEditing] = useState(false);
+  const touchInput = useRef(createTouchInput());
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const touchRef = useRef(false);
+  touchRef.current = touchMode === true;
+  const fireCd = useRef(0);
+  const bpmRef = useRef(bpm);
+  bpmRef.current = bpm;
+
+  useEffect(() => {
+    const d = detectDevice();
+    if (d === "AMBIGUOUS") setAskDevice(true);
+    else setTouchMode(d === "TOUCH");
+  }, []);
+
+  useEffect(() => {
+    if (mounted) setMasterVolume(settings.volume);
+  }, [settings.volume, mounted]);
+
+
+
   const patternRef = useRef(pattern);
   patternRef.current = pattern;
   const floorRef = useRef(floor);
