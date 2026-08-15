@@ -967,6 +967,13 @@ export function NeonDungeon() {
             </button>
             <button
               type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="rounded-sm border border-neon-purple bg-neon-purple/10 px-3 py-2 font-pixel text-[9px] uppercase text-neon-purple"
+            >
+              ⚙
+            </button>
+            <button
+              type="button"
               onClick={() => setRunning((x) => !x)}
               className="rounded-sm border border-neon-cyan bg-neon-cyan/10 px-4 py-2 font-pixel text-[9px] uppercase text-neon-cyan shadow-neon-cyan hover:bg-neon-cyan/20"
             >
