@@ -412,7 +412,18 @@ export function NeonDungeon() {
       timers.forEach(clearTimeout);
       setCurrentStep(-1);
     };
-  }, [running, fire, bpm, paused, editorOpen, dead, transition]);
+  }, [
+    running,
+    fire,
+    bpm,
+    paused,
+    editorOpen,
+    dead,
+    transition,
+    settingsOpen,
+    hudEditing,
+    settings.gameSpeed,
+  ]);
 
   /* ---- simulation + render ---- */
   useEffect(() => {
@@ -424,15 +435,21 @@ export function NeonDungeon() {
     let last = performance.now();
 
     const loop = (now: number) => {
-      const rawDt = Math.min((now - last) / 1000, 0.05);
+      const rawDt = Math.min((now - last) / 1000, 0.05) * settingsRef.current.gameSpeed;
       last = now;
       const frozen = frozenRef.current;
       const dt = frozen ? 0 : rawDt;
       const r = room();
+      const touch = touchRef.current;
+      const ti = touchInput.current;
 
-      /* aim: follows the mouse with rotational inertia */
+      /* aim: mouse (desktop) or right analog stick (touch), with rotational inertia */
       {
-        const target = Math.atan2(mouse.current.y - player.current.y, mouse.current.x - player.current.x);
+        const target = touch
+          ? ti.aimActive
+            ? Math.atan2(ti.aim.y, ti.aim.x)
+            : aimAngle.current
+          : Math.atan2(mouse.current.y - player.current.y, mouse.current.x - player.current.x);
         let diff = target - aimAngle.current;
         while (diff > Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
@@ -441,15 +458,29 @@ export function NeonDungeon() {
         aimAngle.current += aimVel.current * dt;
       }
 
+      /* continuous touch fire, cadenced by the active BPM */
+      if (touch && ti.aimActive && !frozen) {
+        fireCd.current -= dt;
+        if (fireCd.current <= 0) {
+          fireCd.current = 60 / bpmRef.current / 2;
+          fire(2, false);
+        }
+      }
+
       /* movement */
       const k = keys.current;
       let dx = 0;
       let dy = 0;
       if (!frozen) {
-        if (k["a"] || k["arrowleft"]) dx -= 1;
-        if (k["d"] || k["arrowright"]) dx += 1;
-        if (k["w"] || k["arrowup"]) dy -= 1;
-        if (k["s"] || k["arrowdown"]) dy += 1;
+        if (touch) {
+          dx = ti.move.x;
+          dy = ti.move.y;
+        } else {
+          if (k["a"] || k["arrowleft"]) dx -= 1;
+          if (k["d"] || k["arrowright"]) dx += 1;
+          if (k["w"] || k["arrowup"]) dy -= 1;
+          if (k["s"] || k["arrowdown"]) dy += 1;
+        }
       }
       if (dx || dy) {
         const len = Math.hypot(dx, dy);
