@@ -141,6 +141,7 @@ export function NeonDungeon() {
   const pools = useRef<Pool[]>([]);
   const beams = useRef<Beam[]>([]);
   const dash = useRef({ x: 0, y: 0, t: 0 });
+  const lastMove = useRef({ x: 0, y: 0 });
   const vamp = useRef(0);
   const shield = useRef(0);
   const pulse = useRef(0);
@@ -152,7 +153,7 @@ export function NeonDungeon() {
 
   /* ---------- editor actions ---------- */
   const placeBlock = useCallback(
-    (t: number, s: number, block: { track: TrackId; rare: boolean }) => {
+    (t: number, s: number, block: { track: TrackId; rare: boolean; variant: Variant }) => {
       const prev = patternRef.current[t]?.[s] ?? null;
       const setInv = block.rare ? setRareInventory : setInventory;
       setInv((inv) => ({ ...inv, [block.track]: Math.max(0, (inv[block.track] ?? 0) - 1) }));
@@ -162,7 +163,11 @@ export function NeonDungeon() {
         back((inv) => ({ ...inv, [trackId]: (inv[trackId] ?? 0) + 1 }));
       }
       setPattern((p) =>
-        p.map((row, i) => (i === t ? row.map((c, j) => (j === s ? { rare: block.rare } : c)) : row)),
+        p.map((row, i) =>
+          i === t
+            ? row.map((c, j) => (j === s ? { rare: block.rare, variant: block.variant } : c))
+            : row,
+        ),
       );
     },
     [],
@@ -175,6 +180,18 @@ export function NeonDungeon() {
     const back = prev.rare ? setRareInventory : setInventory;
     back((inv) => ({ ...inv, [trackId]: (inv[trackId] ?? 0) + 1 }));
     setPattern((p) => p.map((row, i) => (i === t ? row.map((c, j) => (j === s ? null : c)) : row)));
+  }, []);
+
+  const cycleVariant = useCallback((t: number, s: number) => {
+    setPattern((p) =>
+      p.map((row, i) =>
+        i === t
+          ? row.map((c, j) =>
+              j === s && c ? { ...c, variant: (((c.variant + 1) % 3) as Variant) } : c,
+            )
+          : row,
+      ),
+    );
   }, []);
 
   /* ---------- helpers ---------- */
@@ -347,41 +364,135 @@ export function NeonDungeon() {
     playTrack("synth");
   }, []);
 
-  /* ---- sequencer actions ---- */
-  const fire = useCallback((trackIndex: number, rare: boolean) => {
+  /* ---- sequencer actions: cada bloco dispara seu efeito a partir do personagem ---- */
+  const fire = useCallback((trackIndex: number, rare: boolean, variant: Variant = 0) => {
     const track = TRACKS[trackIndex];
     if (!track || frozenRef.current) return;
     const cx = player.current.x;
     const cy = player.current.y;
     const a = aimAngle.current;
     const f = { x: Math.cos(a), y: Math.sin(a) };
+    const r = room();
+
+    /* Piso Amplificador: dobra tamanho e dano dos projeteis */
+    const amp = tileAt(r, cx, cy) === T.AMPLIFIER;
+    const dMul = (rare ? 1.35 : 1) * (amp ? 2 : 1);
+    const sMul = amp ? 2 : 1;
+    const stepDur = 60 / Math.max(30, bpmRef.current) / 4;
+
+    const shoot = (opts: Partial<Shot> & { vx: number; vy: number }) => {
+      shots.current.push({
+        x: cx,
+        y: cy,
+        life: 2,
+        color: rare ? "#ffffff" : track.color,
+        r: 6 * sMul,
+        dmg: 6 * dMul,
+        hostile: false,
+        pierce: rare,
+        hit: new Set<string>(),
+        ...opts,
+      } as Shot);
+    };
 
     if (track.id === "kick") {
-      const spread = rare ? [-0.12, 0.12] : [0];
-      for (const off of spread) {
-        shots.current.push({
-          x: cx, y: cy,
-          vx: Math.cos(a + off) * 300, vy: Math.sin(a + off) * 300,
-          life: 2, color: rare ? "#ffffff" : track.color, r: 8, dmg: 8,
-          hostile: false, pierce: rare, hit: new Set(),
+      /* Acoes ofensivas diretas */
+      if (variant === 1) {
+        // Sub-Kick: disparo duplo rapido de menor dano
+        for (const off of [-0.07, 0.07])
+          shoot({
+            vx: Math.cos(a + off) * 420,
+            vy: Math.sin(a + off) * 420,
+            r: 5 * sMul,
+            dmg: 5 * dMul,
+            life: 1.6,
+            knock: 8,
+          });
+      } else if (variant === 2) {
+        // Explosive Kick: explode em area ao impactar
+        shoot({
+          vx: f.x * 280,
+          vy: f.y * 280,
+          r: 9 * sMul,
+          dmg: 7 * dMul,
+          explode: true,
+          pierce: false,
+        });
+      } else {
+        // Base: projetil pesado com knockback
+        shoot({
+          vx: f.x * 300,
+          vy: f.y * 300,
+          r: 8 * sMul,
+          dmg: 12 * dMul,
+          knock: 46,
         });
       }
       pulse.current = 1;
-    } else if (track.id === "hat") {
-      const offs = rare ? [-0.35, -0.12, 0.12, 0.35] : [-0.25, 0, 0.25];
-      for (const off of offs) {
-        shots.current.push({
-          x: cx, y: cy,
-          vx: Math.cos(a + off) * 720, vy: Math.sin(a + off) * 720,
-          life: 1.2, color: rare ? "#ffffff" : track.color, r: 3.5, dmg: rare ? 3 : 2,
-          hostile: false, pierce: rare, hit: new Set(),
-        });
+      return;
+    }
+
+    if (track.id === "hat") {
+      /* Velocidade e projecao rapida */
+      if (variant === 1) {
+        // Dash Hat: impulso curto na direcao do movimento
+        const mv = lastMove.current;
+        const len = Math.hypot(mv.x, mv.y);
+        const dx = len > 0.05 ? mv.x / len : f.x;
+        const dy = len > 0.05 ? mv.y / len : f.y;
+        dash.current = { x: dx, y: dy, t: 0.16 };
+        invuln.current = Math.max(invuln.current, 0.16);
+      } else if (variant === 2) {
+        // Homing Hat: 2 projeteis teleguiados
+        for (const off of [-0.25, 0.25])
+          shoot({
+            vx: Math.cos(a + off) * 460,
+            vy: Math.sin(a + off) * 460,
+            r: 4 * sMul,
+            dmg: 3 * dMul,
+            life: 2.2,
+            homing: 6,
+          });
+      } else {
+        // Base: leque triplo rapido
+        for (const off of [-0.25, 0, 0.25])
+          shoot({
+            vx: Math.cos(a + off) * 720,
+            vy: Math.sin(a + off) * 720,
+            r: 3.5 * sMul,
+            dmg: 2 * dMul,
+            life: 1.2,
+          });
       }
-    } else if (track.id === "snare") {
-      shield.current = rare ? 0.9 : 0.5;
-      blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set() });
-      shots.current = shots.current.filter((s) => !s.hostile);
-      const r = room();
+      return;
+    }
+
+    if (track.id === "snare") {
+      /* Defensivo e controle de grupo */
+      if (variant === 1) {
+        // Shield Snare: 0.5s de invulnerabilidade total
+        shield.current = Math.max(shield.current, 0.5);
+        invuln.current = Math.max(invuln.current, 0.5);
+        blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set(), color: "#2ec8ff", dmg: 0 });
+        return;
+      }
+      if (variant === 2) {
+        // Stun Snare: paralisa em raio curto por 1.5s
+        blasts.current.push({
+          x: cx, y: cy, t: 0, hit: new Set(),
+          color: "#8ad8ff", dmg: 1, speed: 150, maxT: 0.55, stun: 1.5,
+        });
+        for (const e of r.enemies) {
+          if (Math.hypot(e.x - cx, e.y - cy) < 110) e.stun = Math.max(e.stun, 1.5);
+        }
+        return;
+      }
+      // Base: pulso de repulsao + anula projeteis inimigos proximos
+      shield.current = Math.max(shield.current, 0.25);
+      blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set(), color: "#2ec8ff", dmg: 3 });
+      shots.current = shots.current.filter(
+        (sh) => !sh.hostile || Math.hypot(sh.x - cx, sh.y - cy) > 170,
+      );
       for (const e of r.enemies) {
         const dx = e.x - cx;
         const dy = e.y - cy;
@@ -391,9 +502,89 @@ export function NeonDungeon() {
           e.y += (dy / d) * 46;
         }
       }
-    } else {
-      blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set() });
-      if (rare) blasts.current.push({ x: cx + f.x * 70, y: cy + f.y * 70, t: 0, hit: new Set() });
+      return;
+    }
+
+    /* synth / bass: area e modificadores */
+    if (variant === 1) {
+      // Beam Synth: feixe continuo durante o step
+      beams.current.push({
+        x: cx, y: cy, a, t: 0,
+        life: Math.max(0.12, stepDur),
+        dmg: 4 * dMul,
+        tick: 0,
+      });
+      return;
+    }
+    if (variant === 2) {
+      // Vamp Bass: janela de cura ao derrotar inimigos sob o som
+      vamp.current = 2;
+      pools.current.push({
+        x: cx, y: cy, r: 70 * sMul, t: 0, life: 2, dmg: 1.5 * dMul, tick: 0,
+      });
+      return;
+    }
+    // Base: poca de som no chao por 2s
+    pools.current.push({
+      x: cx + f.x * 40, y: cy + f.y * 40,
+      r: 62 * sMul, t: 0, life: 2, dmg: 3 * dMul, tick: 0,
+    });
+  }, []);
+
+  /* ---- passo do sequenciador: inimigos ritmicos ---- */
+  const handleStep = useCallback(() => {
+    const r = room();
+    if (frozenRef.current) return;
+    for (const e of r.enemies) {
+      if (e.spawnT > 0 || e.stun > 0) continue;
+      e.steps += 1;
+      if (e.behavior === "LASER_SNIPER_LOCK") {
+        if (e.steps % 4 === 0) {
+          const target = e.lock ?? { x: player.current.x, y: player.current.y };
+          const dx = target.x - e.x;
+          const dy = target.y - e.y;
+          const d = Math.hypot(dx, dy) || 1;
+          shots.current.push({
+            x: e.x, y: e.y,
+            vx: (dx / d) * 900, vy: (dy / d) * 900,
+            life: 1.4, color: "#ff2e5b", r: 4, dmg: e.damage,
+            hostile: true, pierce: false,
+          });
+          e.lock = null;
+        } else {
+          e.lock = { x: player.current.x, y: player.current.y };
+        }
+      }
+      if (e.behavior === "INFECTED_SPEAKER_SPAWNER" && e.steps % 4 === 0) {
+        if (r.enemies.length < 16) {
+          const id = COMMON_ENEMY_IDS[Math.floor(Math.random() * COMMON_ENEMY_IDS.length)]!;
+          const def = getDef(id);
+          const lvl = floorRef.current.level;
+          const hp = scaledHp(def.hpBase, lvl);
+          const ang = Math.random() * Math.PI * 2;
+          r.enemies.push({
+            uid: `s${Math.random().toString(36).slice(2, 9)}`,
+            defId: def.id,
+            x: e.x + Math.cos(ang) * 46,
+            y: e.y + Math.sin(ang) * 46,
+            hp,
+            maxHp: hp,
+            damage: scaledDamage(def.damageBase, lvl),
+            speed: def.speed * 26,
+            behavior: def.behavior,
+            color: def.color,
+            size: def.id === "bass_dropper" ? 36 : 26,
+            cooldown: def.fireRate ?? 1.6,
+            spawnT: 0.5,
+            hitFlash: 0,
+            spikeT: 0,
+            stun: 0,
+            steps: 0,
+            lock: null,
+            vamp: 0,
+          });
+        }
+      }
     }
   }, []);
 
