@@ -247,7 +247,7 @@ function makeEnemy(defId: string, x: number, y: number, level: number, boss = fa
     speed: def.speed * 26,
     behavior: def.behavior,
     color: def.color,
-    size: boss ? 64 : 26,
+    size: boss ? 64 : def.id === "infected_speaker" ? 42 : def.id === "bass_dropper" ? 36 : 26,
     cooldown: def.fireRate ?? 1.6,
     spawnT: 0.5,
     hitFlash: 0,
