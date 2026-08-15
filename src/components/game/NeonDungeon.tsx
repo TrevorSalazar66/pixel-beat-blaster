@@ -936,46 +936,124 @@ export function NeonDungeon() {
     );
   }
 
-  return (
-    <div className="flex w-full max-w-5xl flex-col gap-3">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-pixel text-lg text-neon-magenta drop-shadow-[0_0_12px_rgba(255,61,240,0.6)]">
-            NEON DUNGEON
-          </h1>
-          <p className="mt-2 font-pixel text-[7px] leading-relaxed text-muted-foreground">
-            WASD move · Mouse mira · TAB/Espaço editor · P pausa · Sala {cur?.type ?? "?"} · {roomState}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setPaused((p) => !p)}
-            className="rounded-sm border border-neon-purple bg-neon-purple/10 px-3 py-2 font-pixel text-[9px] uppercase text-neon-purple"
-          >
-            {paused ? "Retomar" : "Pausar"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setRunning((x) => !x)}
-            className="rounded-sm border border-neon-cyan bg-neon-cyan/10 px-4 py-2 font-pixel text-[9px] uppercase text-neon-cyan shadow-neon-cyan hover:bg-neon-cyan/20"
-          >
-            {running ? "Parar" : "Tocar"}
-          </button>
-        </div>
-      </div>
+  const touch = touchMode === true;
 
-      <div className="relative overflow-hidden rounded-lg border border-neon-magenta/40 shadow-neon-magenta">
+  return (
+    <div
+      className={
+        touch
+          ? "fixed inset-0 z-10 flex flex-col bg-background"
+          : "flex w-full max-w-5xl flex-col gap-3"
+      }
+    >
+      {!touch && (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="font-pixel text-lg text-neon-magenta drop-shadow-[0_0_12px_rgba(255,61,240,0.6)]">
+              NEON DUNGEON
+            </h1>
+            <p className="mt-2 font-pixel text-[7px] leading-relaxed text-muted-foreground">
+              WASD move · Mouse mira · TAB/Espaço editor · P pausa · Sala {cur?.type ?? "?"} ·{" "}
+              {roomState}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPaused((p) => !p)}
+              className="rounded-sm border border-neon-purple bg-neon-purple/10 px-3 py-2 font-pixel text-[9px] uppercase text-neon-purple"
+            >
+              {paused ? "Retomar" : "Pausar"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setRunning((x) => !x)}
+              className="rounded-sm border border-neon-cyan bg-neon-cyan/10 px-4 py-2 font-pixel text-[9px] uppercase text-neon-cyan shadow-neon-cyan hover:bg-neon-cyan/20"
+            >
+              {running ? "Parar" : "Tocar"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div
+        className={`relative overflow-hidden ${
+          touch ? "flex-1" : "rounded-lg border border-neon-magenta/40 shadow-neon-magenta"
+        }`}
+        style={{ filter: `brightness(${settings.brightness})` }}
+      >
         <canvas
           ref={canvasRef}
           width={W}
           height={H}
           onMouseMove={onMouseMove}
-          className="block w-full [image-rendering:pixelated]"
+          className={
+            touch
+              ? "block h-full w-full object-contain [image-rendering:pixelated]"
+              : "block w-full [image-rendering:pixelated]"
+          }
         />
 
-        <HUD hp={hp} maxHp={maxHp} coins={coins} floor={floor} roomId={roomId} />
+        {touch ? (
+          <>
+            <TouchControls
+              orientation={orientation}
+              input={touchInput}
+              enabled={!frozenRef.current}
+            />
+            <MobileHUD
+              hp={hp}
+              maxHp={maxHp}
+              coins={coins}
+              floor={floor}
+              roomId={roomId}
+              orientation={orientation}
+              editing={hudEditing}
+              layout={hudLayout}
+              onMix={() => setEditorOpen(true)}
+              onInventory={() => setEditorOpen(true)}
+              onConfig={() => setSettingsOpen(true)}
+            />
+            {hudEditing && (
+              <div className="absolute inset-x-0 bottom-3 z-40 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setHudEditing(false)}
+                  className="rounded-sm border border-neon-magenta bg-background/80 px-4 py-2 font-pixel text-[9px] uppercase text-neon-magenta"
+                >
+                  Salvar layout
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <HUD hp={hp} maxHp={maxHp} coins={coins} floor={floor} roomId={roomId} />
+        )}
         <Sequencer pattern={pattern} currentStep={currentStep} bpm={bpm} />
+
+        {askDevice && touchMode === null && (
+          <DeviceModal
+            onPick={(t) => {
+              setTouchMode(t);
+              setAskDevice(false);
+            }}
+          />
+        )}
+
+        {settingsOpen && (
+          <SettingsModal
+            settings={settings}
+            onChange={updateSettings}
+            editing={hudEditing}
+            onToggleEditing={(v) => {
+              setHudEditing(v);
+              if (v) setSettingsOpen(false);
+            }}
+            onResetLayout={hudLayout.reset}
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
+
 
         {transition && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/90 font-pixel text-[10px] uppercase text-neon-cyan">
