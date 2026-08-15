@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getAudio, playDeath, playTrack, type TrackId } from "@/lib/chiptune";
+import { getAudio, playDeath, playTrack, setMasterVolume, type TrackId } from "@/lib/chiptune";
+import { TouchControls } from "./mobile/TouchControls";
+import { MobileHUD } from "./mobile/MobileHUD";
+import { SettingsModal } from "./mobile/SettingsModal";
+import { DeviceModal } from "./mobile/DeviceModal";
+import { createTouchInput } from "./mobile/types";
+import { detectDevice, useGameSettings, useOrientation } from "@/hooks/useMobileControls";
+import { useHudLayout } from "@/hooks/useHudLayout";
 import { Sequencer } from "./Sequencer";
 import { SequencerEditor } from "./SequencerEditor";
 import { HUD } from "./HUD";
