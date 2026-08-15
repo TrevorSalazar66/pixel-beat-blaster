@@ -373,9 +373,9 @@ export function NeonDungeon() {
 
   /* ---- audio clock ---- */
   useEffect(() => {
-    if (!running || paused || editorOpen || dead || transition) return;
+    if (!running || paused || editorOpen || dead || settingsOpen || hudEditing || transition) return;
     const ac = getAudio();
-    const stepDur = 60 / bpm / 4;
+    const stepDur = 60 / bpm / 4 / settings.gameSpeed;
     let next = ac.currentTime + 0.1;
     let step = 0;
     let raf = 0;
