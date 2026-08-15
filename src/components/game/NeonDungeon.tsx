@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getAudio, playDeath, playTrack, type TrackId } from "@/lib/chiptune";
+import { getAudio, playDeath, playTrack, setMasterVolume, type TrackId } from "@/lib/chiptune";
+import { TouchControls } from "./mobile/TouchControls";
+import { MobileHUD } from "./mobile/MobileHUD";
+import { SettingsModal } from "./mobile/SettingsModal";
+import { DeviceModal } from "./mobile/DeviceModal";
+import { createTouchInput } from "./mobile/types";
+import { detectDevice, useGameSettings, useOrientation } from "@/hooks/useMobileControls";
+import { useHudLayout } from "@/hooks/useHudLayout";
 import { Sequencer } from "./Sequencer";
 import { SequencerEditor } from "./SequencerEditor";
 import { HUD } from "./HUD";
@@ -57,6 +64,35 @@ export function NeonDungeon() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  /* ---------- mobile / touch (Módulo 4) ---------- */
+  const [touchMode, setTouchMode] = useState<boolean | null>(null);
+  const [askDevice, setAskDevice] = useState(false);
+  const orientation = useOrientation();
+  const { settings, update: updateSettings } = useGameSettings();
+  const hudLayout = useHudLayout(orientation);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hudEditing, setHudEditing] = useState(false);
+  const touchInput = useRef(createTouchInput());
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const touchRef = useRef(false);
+  touchRef.current = touchMode === true;
+  const fireCd = useRef(0);
+  const bpmRef = useRef(bpm);
+  bpmRef.current = bpm;
+
+  useEffect(() => {
+    const d = detectDevice();
+    if (d === "AMBIGUOUS") setAskDevice(true);
+    else setTouchMode(d === "TOUCH");
+  }, []);
+
+  useEffect(() => {
+    if (mounted) setMasterVolume(settings.volume);
+  }, [settings.volume, mounted]);
+
+
+
   const patternRef = useRef(pattern);
   patternRef.current = pattern;
   const floorRef = useRef(floor);
@@ -68,7 +104,8 @@ export function NeonDungeon() {
   const deadRef = useRef(dead);
   deadRef.current = dead;
   const frozenRef = useRef(false);
-  frozenRef.current = paused || editorOpen || dead || transition !== null;
+  frozenRef.current =
+    paused || editorOpen || dead || settingsOpen || hudEditing || transition !== null;
 
   const keys = useRef<Record<string, boolean>>({});
   const player = useRef<Vec>({ x: W / 2, y: H / 2 });
@@ -336,9 +373,9 @@ export function NeonDungeon() {
 
   /* ---- audio clock ---- */
   useEffect(() => {
-    if (!running || paused || editorOpen || dead || transition) return;
+    if (!running || paused || editorOpen || dead || settingsOpen || hudEditing || transition) return;
     const ac = getAudio();
-    const stepDur = 60 / bpm / 4;
+    const stepDur = 60 / bpm / 4 / settings.gameSpeed;
     let next = ac.currentTime + 0.1;
     let step = 0;
     let raf = 0;
@@ -375,7 +412,18 @@ export function NeonDungeon() {
       timers.forEach(clearTimeout);
       setCurrentStep(-1);
     };
-  }, [running, fire, bpm, paused, editorOpen, dead, transition]);
+  }, [
+    running,
+    fire,
+    bpm,
+    paused,
+    editorOpen,
+    dead,
+    transition,
+    settingsOpen,
+    hudEditing,
+    settings.gameSpeed,
+  ]);
 
   /* ---- simulation + render ---- */
   useEffect(() => {
@@ -387,15 +435,21 @@ export function NeonDungeon() {
     let last = performance.now();
 
     const loop = (now: number) => {
-      const rawDt = Math.min((now - last) / 1000, 0.05);
+      const rawDt = Math.min((now - last) / 1000, 0.05) * settingsRef.current.gameSpeed;
       last = now;
       const frozen = frozenRef.current;
       const dt = frozen ? 0 : rawDt;
       const r = room();
+      const touch = touchRef.current;
+      const ti = touchInput.current;
 
-      /* aim: follows the mouse with rotational inertia */
+      /* aim: mouse (desktop) or right analog stick (touch), with rotational inertia */
       {
-        const target = Math.atan2(mouse.current.y - player.current.y, mouse.current.x - player.current.x);
+        const target = touch
+          ? ti.aimActive
+            ? Math.atan2(ti.aim.y, ti.aim.x)
+            : aimAngle.current
+          : Math.atan2(mouse.current.y - player.current.y, mouse.current.x - player.current.x);
         let diff = target - aimAngle.current;
         while (diff > Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
@@ -404,15 +458,29 @@ export function NeonDungeon() {
         aimAngle.current += aimVel.current * dt;
       }
 
+      /* continuous touch fire, cadenced by the active BPM */
+      if (touch && ti.aimActive && !frozen) {
+        fireCd.current -= dt;
+        if (fireCd.current <= 0) {
+          fireCd.current = 60 / bpmRef.current / 2;
+          fire(2, false);
+        }
+      }
+
       /* movement */
       const k = keys.current;
       let dx = 0;
       let dy = 0;
       if (!frozen) {
-        if (k["a"] || k["arrowleft"]) dx -= 1;
-        if (k["d"] || k["arrowright"]) dx += 1;
-        if (k["w"] || k["arrowup"]) dy -= 1;
-        if (k["s"] || k["arrowdown"]) dy += 1;
+        if (touch) {
+          dx = ti.move.x;
+          dy = ti.move.y;
+        } else {
+          if (k["a"] || k["arrowleft"]) dx -= 1;
+          if (k["d"] || k["arrowright"]) dx += 1;
+          if (k["w"] || k["arrowup"]) dy -= 1;
+          if (k["s"] || k["arrowdown"]) dy += 1;
+        }
       }
       if (dx || dy) {
         const len = Math.hypot(dx, dy);
@@ -849,7 +917,7 @@ export function NeonDungeon() {
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [buy, clearRoom, damagePlayer, enterRoom, goToFloor, mounted]);
+  }, [buy, clearRoom, damagePlayer, enterRoom, fire, goToFloor, mounted]);
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -868,46 +936,131 @@ export function NeonDungeon() {
     );
   }
 
-  return (
-    <div className="flex w-full max-w-5xl flex-col gap-3">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-pixel text-lg text-neon-magenta drop-shadow-[0_0_12px_rgba(255,61,240,0.6)]">
-            NEON DUNGEON
-          </h1>
-          <p className="mt-2 font-pixel text-[7px] leading-relaxed text-muted-foreground">
-            WASD move · Mouse mira · TAB/Espaço editor · P pausa · Sala {cur?.type ?? "?"} · {roomState}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setPaused((p) => !p)}
-            className="rounded-sm border border-neon-purple bg-neon-purple/10 px-3 py-2 font-pixel text-[9px] uppercase text-neon-purple"
-          >
-            {paused ? "Retomar" : "Pausar"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setRunning((x) => !x)}
-            className="rounded-sm border border-neon-cyan bg-neon-cyan/10 px-4 py-2 font-pixel text-[9px] uppercase text-neon-cyan shadow-neon-cyan hover:bg-neon-cyan/20"
-          >
-            {running ? "Parar" : "Tocar"}
-          </button>
-        </div>
-      </div>
+  const touch = touchMode === true;
 
-      <div className="relative overflow-hidden rounded-lg border border-neon-magenta/40 shadow-neon-magenta">
+  return (
+    <div
+      className={
+        touch
+          ? "fixed inset-0 z-10 flex flex-col bg-background"
+          : "flex w-full max-w-5xl flex-col gap-3"
+      }
+    >
+      {!touch && (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="font-pixel text-lg text-neon-magenta drop-shadow-[0_0_12px_rgba(255,61,240,0.6)]">
+              NEON DUNGEON
+            </h1>
+            <p className="mt-2 font-pixel text-[7px] leading-relaxed text-muted-foreground">
+              WASD move · Mouse mira · TAB/Espaço editor · P pausa · Sala {cur?.type ?? "?"} ·{" "}
+              {roomState}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPaused((p) => !p)}
+              className="rounded-sm border border-neon-purple bg-neon-purple/10 px-3 py-2 font-pixel text-[9px] uppercase text-neon-purple"
+            >
+              {paused ? "Retomar" : "Pausar"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="rounded-sm border border-neon-purple bg-neon-purple/10 px-3 py-2 font-pixel text-[9px] uppercase text-neon-purple"
+            >
+              ⚙
+            </button>
+            <button
+              type="button"
+              onClick={() => setRunning((x) => !x)}
+              className="rounded-sm border border-neon-cyan bg-neon-cyan/10 px-4 py-2 font-pixel text-[9px] uppercase text-neon-cyan shadow-neon-cyan hover:bg-neon-cyan/20"
+            >
+              {running ? "Parar" : "Tocar"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div
+        className={`relative overflow-hidden ${
+          touch ? "flex-1" : "rounded-lg border border-neon-magenta/40 shadow-neon-magenta"
+        }`}
+        style={{ filter: `brightness(${settings.brightness})` }}
+      >
         <canvas
           ref={canvasRef}
           width={W}
           height={H}
           onMouseMove={onMouseMove}
-          className="block w-full [image-rendering:pixelated]"
+          className={
+            touch
+              ? "block h-full w-full object-contain [image-rendering:pixelated]"
+              : "block w-full [image-rendering:pixelated]"
+          }
         />
 
-        <HUD hp={hp} maxHp={maxHp} coins={coins} floor={floor} roomId={roomId} />
+        {touch ? (
+          <>
+            <TouchControls
+              orientation={orientation}
+              input={touchInput}
+              enabled={!frozenRef.current}
+            />
+            <MobileHUD
+              hp={hp}
+              maxHp={maxHp}
+              coins={coins}
+              floor={floor}
+              roomId={roomId}
+              orientation={orientation}
+              editing={hudEditing}
+              layout={hudLayout}
+              onMix={() => setEditorOpen(true)}
+              onInventory={() => setEditorOpen(true)}
+              onConfig={() => setSettingsOpen(true)}
+            />
+            {hudEditing && (
+              <div className="absolute inset-x-0 bottom-3 z-40 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setHudEditing(false)}
+                  className="rounded-sm border border-neon-magenta bg-background/80 px-4 py-2 font-pixel text-[9px] uppercase text-neon-magenta"
+                >
+                  Salvar layout
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <HUD hp={hp} maxHp={maxHp} coins={coins} floor={floor} roomId={roomId} />
+        )}
         <Sequencer pattern={pattern} currentStep={currentStep} bpm={bpm} />
+
+        {askDevice && touchMode === null && (
+          <DeviceModal
+            onPick={(t) => {
+              setTouchMode(t);
+              setAskDevice(false);
+            }}
+          />
+        )}
+
+        {settingsOpen && (
+          <SettingsModal
+            settings={settings}
+            onChange={updateSettings}
+            editing={hudEditing}
+            onToggleEditing={(v) => {
+              setHudEditing(v);
+              if (v) setSettingsOpen(false);
+            }}
+            onResetLayout={hudLayout.reset}
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
+
 
         {transition && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/90 font-pixel text-[10px] uppercase text-neon-cyan">
