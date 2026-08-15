@@ -10,8 +10,8 @@ import { useHudLayout } from "@/hooks/useHudLayout";
 import { Sequencer } from "./Sequencer";
 import { SequencerEditor } from "./SequencerEditor";
 import { HUD } from "./HUD";
-import { STEPS, TRACKS, countNotes, createPattern, type Pattern } from "./tracks";
-import { ROOM_H, ROOM_W, TILE, TILE_PROPS, T } from "./dungeon/tiles";
+import { STEPS, TRACKS, countNotes, createPattern, type Pattern, type Variant } from "./tracks";
+import { PILLAR_HP, ROOM_H, ROOM_W, TILE, TILE_PROPS, T } from "./dungeon/tiles";
 import {
   dirDelta,
   generateFloor,
@@ -22,6 +22,7 @@ import {
   type Room,
 } from "./dungeon/generate";
 import { rollBlock } from "./dungeon/drops";
+import { COMMON_ENEMY_IDS, getDef, scaledDamage, scaledHp } from "./dungeon/enemies";
 import { SHOP_ITEMS, type ShopItemId } from "./dungeon/shop";
 
 const W = ROOM_W * TILE;
@@ -35,8 +36,26 @@ type Shot = {
   x: number; y: number; vx: number; vy: number; life: number;
   color: string; r: number; dmg: number; hostile: boolean; pierce: boolean;
   hit?: Set<string>;
+  /** empurra o inimigo atingido (px) */
+  knock?: number;
+  /** explode em area ao impactar */
+  explode?: boolean;
+  /** persegue o inimigo mais proximo */
+  homing?: number;
 };
-type Blast = { x: number; y: number; t: number; hit: Set<string> };
+type Blast = {
+  x: number; y: number; t: number; hit: Set<string>;
+  hostile?: boolean;
+  dmg?: number;
+  speed?: number;
+  maxT?: number;
+  color?: string;
+  stun?: number;
+};
+/** Poca de som: dano continuo em area (Synth base). */
+type Pool = { x: number; y: number; r: number; t: number; life: number; dmg: number; tick: number };
+/** Feixe laser continuo (Beam Synth). */
+type Beam = { x: number; y: number; a: number; t: number; life: number; dmg: number; tick: number };
 type Pickup = { x: number; y: number; kind: "block" | "coin"; track?: TrackId; color: string };
 type Pedestal = { x: number; y: number; item: ShopItemId; sold: boolean };
 
@@ -46,7 +65,8 @@ export function NeonDungeon() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [pattern, setPattern] = useState<Pattern>(createPattern);
   const [currentStep, setCurrentStep] = useState(-1);
-  const [running, setRunning] = useState(false);
+  const [running, setRunning] = useState(true);
+  const [bpmMod, setBpmMod] = useState(0);
   const [paused, setPaused] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [inventory, setInventory] = useState<Record<TrackId, number>>(emptyInv);
@@ -79,7 +99,9 @@ export function NeonDungeon() {
   touchRef.current = touchMode === true;
   const fireCd = useRef(0);
   const bpmRef = useRef(bpm);
-  bpmRef.current = bpm;
+  bpmRef.current = bpm + bpmMod;
+  const bpmModRef = useRef(0);
+  bpmModRef.current = bpmMod;
 
   useEffect(() => {
     const d = detectDevice();
@@ -116,6 +138,10 @@ export function NeonDungeon() {
   const blasts = useRef<Blast[]>([]);
   const pickups = useRef<Pickup[]>([]);
   const pedestals = useRef<Record<string, Pedestal[]>>({});
+  const pools = useRef<Pool[]>([]);
+  const beams = useRef<Beam[]>([]);
+  const dash = useRef({ x: 0, y: 0, t: 0 });
+  const vamp = useRef(0);
   const shield = useRef(0);
   const pulse = useRef(0);
   const invuln = useRef(0);
