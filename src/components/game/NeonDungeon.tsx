@@ -104,7 +104,8 @@ export function NeonDungeon() {
   const deadRef = useRef(dead);
   deadRef.current = dead;
   const frozenRef = useRef(false);
-  frozenRef.current = paused || editorOpen || dead || transition !== null;
+  frozenRef.current =
+    paused || editorOpen || dead || settingsOpen || hudEditing || transition !== null;
 
   const keys = useRef<Record<string, boolean>>({});
   const player = useRef<Vec>({ x: W / 2, y: H / 2 });
