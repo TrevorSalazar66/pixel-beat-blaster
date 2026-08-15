@@ -217,6 +217,20 @@ export function NeonDungeon() {
 
   const bump = () => setFloor((f) => ({ ...f }));
 
+  /** Pilares destrutiveis absorvem dano ate serem destruidos. */
+  const hitPillar = (r: Room, px: number, py: number, dmg: number) => {
+    const tx = Math.floor(px / TILE);
+    const ty = Math.floor(py / TILE);
+    if (r.tiles[ty]?.[tx] !== T.PILLAR) return false;
+    const k = `${tx},${ty}`;
+    const left = (r.pillars[k] ?? PILLAR_HP) - dmg;
+    if (left <= 0) {
+      delete r.pillars[k];
+      r.tiles[ty]![tx] = T.FLOOR;
+    } else r.pillars[k] = left;
+    return true;
+  };
+
   const damagePlayer = useCallback((amount: number) => {
     if (invuln.current > 0 || deadRef.current) return;
     invuln.current = 1;
@@ -885,11 +899,42 @@ export function NeonDungeon() {
 
         /* shots */
         shots.current = shots.current.filter((s) => {
+          /* Homing Hat: curva a rota para o inimigo mais proximo */
+          if (s.homing) {
+            let best: { x: number; y: number } | null = null;
+            let bd = Infinity;
+            for (const e of cur.enemies) {
+              if (e.spawnT > 0) continue;
+              const d = Math.hypot(e.x - s.x, e.y - s.y);
+              if (d < bd) {
+                bd = d;
+                best = e;
+              }
+            }
+            if (best) {
+              const sp = Math.hypot(s.vx, s.vy) || 1;
+              const tx = (best.x - s.x) / (bd || 1);
+              const ty = (best.y - s.y) / (bd || 1);
+              const nvx = s.vx / sp + tx * s.homing * dt;
+              const nvy = s.vy / sp + ty * s.homing * dt;
+              const nl = Math.hypot(nvx, nvy) || 1;
+              s.vx = (nvx / nl) * sp;
+              s.vy = (nvy / nl) * sp;
+            }
+          }
           s.x += s.vx * dt;
           s.y += s.vy * dt;
           s.life -= dt;
           if (s.life <= 0) return false;
-          if (blocksShot(cur, s.x, s.y)) return false;
+          if (blocksShot(cur, s.x, s.y)) {
+            if (!s.hostile) hitPillar(cur, s.x, s.y, s.dmg);
+            if (s.explode)
+              blasts.current.push({
+                x: s.x, y: s.y, t: 0, hit: new Set(),
+                dmg: s.dmg * 1.5, speed: 300, maxT: 0.4, color: s.color,
+              });
+            return false;
+          }
           if (s.hostile) {
             if (shield.current > 0) return false;
             if (Math.hypot(s.x - player.current.x, s.y - player.current.y) < SIZE / 2 + s.r) {
@@ -903,6 +948,20 @@ export function NeonDungeon() {
               if (Math.hypot(s.x - e.x, s.y - e.y) < e.size / 2 + s.r) {
                 e.hp -= s.dmg;
                 e.hitFlash = 0.15;
+                if (s.knock) {
+                  const sp = Math.hypot(s.vx, s.vy) || 1;
+                  const kx = e.x + (s.vx / sp) * s.knock;
+                  const ky = e.y + (s.vy / sp) * s.knock;
+                  if (!solidFor(cur, kx, e.y, true)) e.x = kx;
+                  if (!solidFor(cur, e.x, ky, true)) e.y = ky;
+                }
+                if (s.explode) {
+                  blasts.current.push({
+                    x: s.x, y: s.y, t: 0, hit: new Set(),
+                    dmg: s.dmg * 1.5, speed: 300, maxT: 0.4, color: s.color,
+                  });
+                  return false;
+                }
                 if (!s.pierce) return false;
                 s.hit?.add(e.uid);
               }
@@ -914,22 +973,88 @@ export function NeonDungeon() {
         /* blasts */
         blasts.current = blasts.current.filter((b) => {
           b.t += dt;
-          const rad = b.t * 260;
-          for (const e of cur.enemies) {
-            if (e.spawnT > 0 || b.hit.has(e.uid)) continue;
-            if (Math.hypot(e.x - b.x, e.y - b.y) < rad) {
-              b.hit.add(e.uid);
-              e.hp -= 4;
-              e.hitFlash = 0.15;
+          const speed = b.speed ?? 260;
+          const maxT = b.maxT ?? 0.45;
+          const rad = b.t * speed;
+          if (b.hostile) {
+            if (
+              !b.hit.has("player") &&
+              shield.current <= 0 &&
+              Math.hypot(player.current.x - b.x, player.current.y - b.y) < rad
+            ) {
+              b.hit.add("player");
+              damagePlayer(b.dmg ?? 1);
+            }
+          } else {
+            for (const e of cur.enemies) {
+              if (e.spawnT > 0 || b.hit.has(e.uid)) continue;
+              if (Math.hypot(e.x - b.x, e.y - b.y) < rad) {
+                b.hit.add(e.uid);
+                e.hp -= b.dmg ?? 4;
+                e.hitFlash = 0.15;
+                if (b.stun) e.stun = Math.max(e.stun, b.stun);
+              }
             }
           }
-          return b.t < 0.45;
+          return b.t < maxT;
         });
+
+        /* pocas de som: dano continuo em area */
+        pools.current = pools.current.filter((pl) => {
+          pl.t += dt;
+          pl.tick += dt;
+          if (pl.tick >= 0.25) {
+            pl.tick = 0;
+            for (const e of cur.enemies) {
+              if (e.spawnT > 0) continue;
+              if (Math.hypot(e.x - pl.x, e.y - pl.y) < pl.r + e.size / 2) {
+                e.hp -= pl.dmg;
+                e.hitFlash = 0.1;
+                if (vamp.current > 0) e.vamp = 1.2;
+              }
+            }
+          }
+          return pl.t < pl.life;
+        });
+
+        /* feixes laser continuos */
+        beams.current = beams.current.filter((bm) => {
+          bm.t += dt;
+          bm.tick += dt;
+          if (bm.tick >= 0.12) {
+            bm.tick = 0;
+            const dirx = Math.cos(bm.a);
+            const diry = Math.sin(bm.a);
+            for (let d = 12; d < 1200; d += 12) {
+              const bx = bm.x + dirx * d;
+              const by = bm.y + diry * d;
+              if (blocksShot(cur, bx, by)) {
+                hitPillar(cur, bx, by, bm.dmg);
+                break;
+              }
+              for (const e of cur.enemies) {
+                if (e.spawnT > 0) continue;
+                if (Math.hypot(e.x - bx, e.y - by) < e.size / 2 + 8) {
+                  e.hp -= bm.dmg;
+                  e.hitFlash = 0.1;
+                  if (vamp.current > 0) e.vamp = 1.2;
+                }
+              }
+            }
+          }
+          return bm.t < bm.life;
+        });
+
+        vamp.current = Math.max(0, vamp.current - dt);
 
         /* deaths + coins + room clear */
         const dying = cur.enemies.filter((e) => e.hp <= 0);
         if (dying.length) {
           for (const e of dying) {
+            /* Vamp Bass: 10% de chance de restaurar 1 HP */
+            if ((e.vamp > 0 || vamp.current > 0) && Math.random() < 0.1) {
+              setHp((h) => Math.min(h + 1, maxHpRef.current));
+            }
             const n = e.size > 40 ? 12 : 1 + Math.floor(Math.random() * 3);
             for (let i = 0; i < n; i++) {
               pickups.current.push({
