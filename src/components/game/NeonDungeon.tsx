@@ -917,7 +917,7 @@ export function NeonDungeon() {
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [buy, clearRoom, damagePlayer, enterRoom, goToFloor, mounted]);
+  }, [buy, clearRoom, damagePlayer, enterRoom, fire, goToFloor, mounted]);
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
