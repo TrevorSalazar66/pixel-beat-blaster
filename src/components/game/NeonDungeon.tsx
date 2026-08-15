@@ -590,9 +590,9 @@ export function NeonDungeon() {
 
   /* ---- audio clock ---- */
   useEffect(() => {
-    if (!running || paused || editorOpen || dead || settingsOpen || hudEditing || transition) return;
+    if (!running || paused || dead || transition) return;
     const ac = getAudio();
-    const stepDur = 60 / bpm / 4 / settings.gameSpeed;
+    const stepDur = 60 / (bpm + bpmMod) / 4 / settings.gameSpeed;
     let next = ac.currentTime + 0.1;
     let step = 0;
     let raf = 0;
@@ -610,9 +610,10 @@ export function NeonDungeon() {
           window.setTimeout(
             () => {
               setCurrentStep(s);
+              handleStep();
               patternRef.current.forEach((row, t) => {
                 const cell = row[s];
-                if (cell) fire(t, cell.rare);
+                if (cell) fire(t, cell.rare, cell.variant);
               });
             },
             Math.max(0, (when - ac.currentTime) * 1000),
@@ -629,18 +630,7 @@ export function NeonDungeon() {
       timers.forEach(clearTimeout);
       setCurrentStep(-1);
     };
-  }, [
-    running,
-    fire,
-    bpm,
-    paused,
-    editorOpen,
-    dead,
-    transition,
-    settingsOpen,
-    hudEditing,
-    settings.gameSpeed,
-  ]);
+  }, [running, fire, handleStep, bpm, bpmMod, paused, dead, transition, settings.gameSpeed]);
 
   /* ---- simulation + render ---- */
   useEffect(() => {
@@ -700,9 +690,20 @@ export function NeonDungeon() {
         }
       }
       if (dx || dy) {
+        const l0 = Math.hypot(dx, dy);
+        lastMove.current = { x: dx / l0, y: dy / l0 };
+      }
+      /* Dash Hat: impulso curto */
+      if (dash.current.t > 0) {
+        dash.current.t = Math.max(0, dash.current.t - rawDt);
+        dx += dash.current.x * 3.2;
+        dy += dash.current.y * 3.2;
+      }
+      if (dx || dy) {
         const len = Math.hypot(dx, dy);
-        dx /= len;
-        dy /= len;
+        const boost = Math.min(3.4, len);
+        dx = (dx / len) * boost;
+        dy = (dy / len) * boost;
         const half = SIZE / 2 - 3;
         const nx = player.current.x + dx * SPEED * dt;
         const ny = player.current.y + dy * SPEED * dt;
@@ -717,6 +718,14 @@ export function NeonDungeon() {
       if (!frozen) {
         /* spikes */
         const under = tileAt(r, player.current.x, player.current.y);
+
+        /* Plataformas de BPM: aceleram / desaceleram a musica */
+        const targetMod = under === T.BPM_UP ? 20 : under === T.BPM_DOWN ? -20 : 0;
+        if (targetMod !== bpmModRef.current) {
+          bpmModRef.current = targetMod;
+          setBpmMod(targetMod);
+        }
+
         if (under === T.SPIKE) {
           spikeT.current += dt;
           if (spikeT.current >= 1.5) {
