@@ -99,3 +99,9 @@ export function playDeath() {
     osc.stop(t + i * 0.18 + 1.2);
   });
 }
+
+/** Master volume (0 – 1). */
+export function setMasterVolume(v: number) {
+  getAudio();
+  if (master) master.gain.value = Math.max(0, Math.min(1, v));
+}
