@@ -972,13 +972,70 @@ export function NeonDungeon() {
               boss || (dist < 620 && hasLineOfSight(cur, e.x, e.y, player.current.x, player.current.y));
             if (e.cooldown <= 0) {
               /* recarrega sempre, mesmo sem tiro: evita rajadas infinitas */
-              e.cooldown = boss ? 1.4 : getDef(e.defId).fireRate ?? 2;
-              if (!canSee) {
+              if (!boss) e.cooldown = getDef(e.defId).fireRate ?? 2;
+              if (!canSee && !boss) {
                 /* sem linha de visao apenas espera o proximo ciclo */
               } else if (boss) {
-                for (let i = 0; i < 10; i++) {
-                  const a = (i / 10) * Math.PI * 2;
-                  shots.current.push({ x: e.x, y: e.y, vx: Math.cos(a) * 200, vy: Math.sin(a) * 200, life: 2.4, color: e.color, r: 5, dmg: e.damage, hostile: true, pierce: false });
+                /* O Maestro Subwoofer: 3 fases, padroes encadeados */
+                const frac = e.hp / Math.max(1, e.maxHp);
+                const phase = frac > 0.66 ? 0 : frac > 0.33 ? 1 : 2;
+                const pat = (e.spawned ?? 0) % 4;
+                e.spawned = (e.spawned ?? 0) + 1;
+                e.cooldown = phase === 2 ? 0.75 : phase === 1 ? 1.0 : 1.3;
+                const bshot = (
+                  ang: number,
+                  spd: number,
+                  extra: Partial<Shot> = {},
+                ) =>
+                  shots.current.push({
+                    x: e.x,
+                    y: e.y,
+                    vx: Math.cos(ang) * spd,
+                    vy: Math.sin(ang) * spd,
+                    life: 2.6,
+                    color: e.color,
+                    r: 5,
+                    dmg: e.damage,
+                    hostile: true,
+                    pierce: false,
+                    ...extra,
+                  } as Shot);
+                const toPlayer = Math.atan2(ey, ex);
+
+                if (pat === 0) {
+                  /* anel radial giratorio (mais denso nas fases finais) */
+                  const n = 10 + phase * 6;
+                  const rot = (e.spawned * 0.21) % (Math.PI * 2);
+                  for (let i = 0; i < n; i++) bshot((i / n) * Math.PI * 2 + rot, 200 + phase * 30);
+                } else if (pat === 1) {
+                  /* rajada mirada em leque rapido */
+                  const spread = 0.18;
+                  const arms = 3 + phase;
+                  for (let i = 0; i < arms; i++)
+                    bshot(toPlayer + (i - (arms - 1) / 2) * spread, 340 + phase * 40, { r: 4.5 });
+                  if (phase >= 1)
+                    for (let i = 0; i < 2; i++)
+                      bshot(toPlayer + (i ? 0.5 : -0.5), 260, { r: 4, homing: 2.5, life: 3 });
+                } else if (pat === 2) {
+                  /* espiral dupla */
+                  const rot = e.spawned * 0.6;
+                  for (let arm = 0; arm < 2 + phase; arm++) {
+                    const base = rot + (arm / (2 + phase)) * Math.PI * 2;
+                    for (let i = 0; i < 4; i++) bshot(base + i * 0.16, 210 + i * 40);
+                  }
+                } else {
+                  /* onda de choque + parede de sub-bass */
+                  blasts.current.push({
+                    x: e.x, y: e.y, t: 0, hit: new Set(),
+                    hostile: true, dmg: e.damage, speed: 300 + phase * 60,
+                    maxT: 0.75, color: e.color,
+                  });
+                  const n = 8 + phase * 4;
+                  for (let i = 0; i < n; i++)
+                    bshot(toPlayer - 0.7 + (i / (n - 1)) * 1.4, 190 + phase * 40, { r: 6 });
+                  if (phase === 2)
+                    for (let i = 0; i < 12; i++)
+                      bshot((i / 12) * Math.PI * 2 + 0.26, 150, { life: 3.2 });
                 }
               } else {
                 shots.current.push({ x: e.x, y: e.y, vx: (ex / dist) * 260, vy: (ey / dist) * 260, life: 2.4, color: e.color, r: 4.5, dmg: e.damage, hostile: true, pierce: false });
