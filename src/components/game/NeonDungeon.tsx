@@ -792,7 +792,7 @@ export function NeonDungeon() {
         if (!see) {
           e.lock = null;
           e.steps = 0;
-        } else if (e.steps % 4 === 0) {
+        } else if (e.steps % 8 === 0) {
           const target = e.lock ?? { x: player.current.x, y: player.current.y };
           const dx = target.x - e.x;
           const dy = target.y - e.y;
