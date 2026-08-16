@@ -23,15 +23,23 @@ import {
 } from "./dungeon/generate";
 import { rollBlock } from "./dungeon/drops";
 import {
-  COMMON_ENEMY_IDS,
   MAX_ENEMIES_PER_ROOM,
   SPAWNER_ACTIVE_LIMIT,
   SPAWNER_BUDGET,
   getDef,
+  rollEnemyId,
   scaledDamage,
   scaledHp,
 } from "./dungeon/enemies";
-import { SHOP_ITEMS, type ShopItemId } from "./dungeon/shop";
+import {
+  FORGE_INPUT,
+  FORGE_VARIANT_CHANCE,
+  SHOP_ITEMS,
+  forgeFee,
+  itemCost,
+  type ShopItemId,
+} from "./dungeon/shop";
+import { ForgeModal } from "./ForgeModal";
 
 const W = ROOM_W * TILE;
 const H = ROOM_H * TILE;
@@ -78,6 +86,12 @@ type Pickup = { x: number; y: number; kind: "block" | "coin"; track?: TrackId; c
 type Pedestal = { x: number; y: number; item: ShopItemId; sold: boolean };
 
 const emptyInv = (): Record<TrackId, number> => ({ kick: 0, snare: 0, hat: 0, synth: 0 });
+const emptyVarInv = (): Record<TrackId, [number, number]> => ({
+  kick: [0, 0],
+  snare: [0, 0],
+  hat: [0, 0],
+  synth: [0, 0],
+});
 
 export function NeonDungeon() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -89,6 +103,10 @@ export function NeonDungeon() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [inventory, setInventory] = useState<Record<TrackId, number>>(emptyInv);
   const [rareInventory, setRareInventory] = useState<Record<TrackId, number>>(emptyInv);
+  /** blocos de variacao A/B: obtidos apenas na Forja */
+  const [varInventory, setVarInventory] = useState<Record<TrackId, [number, number]>>(emptyVarInv);
+  const [forgeOpen, setForgeOpen] = useState(false);
+  const [forgeMsg, setForgeMsg] = useState<string | null>(null);
   const [coins, setCoins] = useState(0);
   const [bpm, setBpm] = useState(120);
   const [maxHp, setMaxHp] = useState(START_HP);
