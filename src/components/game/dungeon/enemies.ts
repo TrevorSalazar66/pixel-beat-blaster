@@ -12,7 +12,15 @@ export type Behavior =
   | "SHOOT_SPREAD_BURST"
   | "FLY_TELEPORT_BLINK"
   | "SIREN_HEALER"
-  | "BASS_QUAKE_DOUBLE";
+  | "BASS_QUAKE_DOUBLE"
+  /* bosses alternativos */
+  | "BOSS_BOUNCE_SPLIT"
+  | "BOSS_TRI_SPIRAL"
+  /* emboscada pos-sala */
+  | "PENTAGON_AMBUSH";
+
+/** Forma desenhada do inimigo. */
+export type EnemyShape = "square" | "circle" | "triangle" | "pentagon";
 
 export type EnemyDef = {
   id: string;
@@ -25,6 +33,7 @@ export type EnemyDef = {
   color: string;
   /** inimigo variante (elite) */
   variant?: boolean;
+  shape?: EnemyShape;
 };
 
 export const ENEMY_DEFS: EnemyDef[] = [
