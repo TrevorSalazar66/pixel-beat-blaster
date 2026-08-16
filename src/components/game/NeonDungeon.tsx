@@ -1542,18 +1542,26 @@ export function NeonDungeon() {
             damagePlayer(e.damage);
         }
 
+        if (born.length && cur.enemies.length < MAX_ENEMIES_PER_ROOM + 4)
+          cur.enemies.push(...born);
+
         /* shots */
         shots.current = shots.current.filter((s) => {
           /* Homing Hat: curva a rota para o inimigo mais proximo */
           if (s.homing) {
             let best: { x: number; y: number } | null = null;
             let bd = Infinity;
-            for (const e of cur.enemies) {
-              if (e.spawnT > 0) continue;
-              const d = Math.hypot(e.x - s.x, e.y - s.y);
-              if (d < bd) {
-                bd = d;
-                best = e;
+            if (s.hostile) {
+              best = player.current;
+              bd = Math.hypot(player.current.x - s.x, player.current.y - s.y);
+            } else {
+              for (const e of cur.enemies) {
+                if (e.spawnT > 0) continue;
+                const d = Math.hypot(e.x - s.x, e.y - s.y);
+                if (d < bd) {
+                  bd = d;
+                  best = e;
+                }
               }
             }
             if (best) {
@@ -1570,8 +1578,34 @@ export function NeonDungeon() {
           s.x += s.vx * dt;
           s.y += s.vy * dt;
           s.life -= dt;
-          if (s.life <= 0) return false;
+          if (s.life <= 0) {
+            if (s.explode)
+              blasts.current.push({
+                x: s.x,
+                y: s.y,
+                t: 0,
+                hit: new Set(),
+                hostile: s.hostile,
+                dmg: s.dmg * 1.5,
+                speed: s.boomR ?? 300,
+                maxT: 0.4,
+                color: s.color,
+              });
+            return false;
+          }
           if (blocksShot(cur, s.x, s.y)) {
+            /* Sub-Kick: ricochete nas paredes */
+            if (s.bounce && s.bounce > 0) {
+              s.bounce -= 1;
+              const bx = blocksShot(cur, s.x + Math.sign(s.vx) * 6, s.y - s.vy * dt);
+              if (bx) s.vx *= -1;
+              else s.vy *= -1;
+              s.x -= s.vx * dt;
+              s.y -= s.vy * dt;
+              if (!s.hostile) hitPillar(cur, s.x, s.y, s.dmg);
+              s.hit = new Set<string>();
+              return true;
+            }
             if (!s.hostile) hitPillar(cur, s.x, s.y, s.dmg);
             if (s.explode)
               blasts.current.push({
@@ -1579,8 +1613,9 @@ export function NeonDungeon() {
                 y: s.y,
                 t: 0,
                 hit: new Set(),
+                hostile: s.hostile,
                 dmg: s.dmg * 1.5,
-                speed: 300,
+                speed: s.boomR ?? 300,
                 maxT: 0.4,
                 color: s.color,
               });
@@ -1613,8 +1648,9 @@ export function NeonDungeon() {
                     y: s.y,
                     t: 0,
                     hit: new Set(),
+                    hostile: s.hostile,
                     dmg: s.dmg * 1.5,
-                    speed: 300,
+                    speed: s.boomR ?? 300,
                     maxT: 0.4,
                     color: s.color,
                   });
