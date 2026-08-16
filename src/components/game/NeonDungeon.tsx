@@ -23,15 +23,23 @@ import {
 } from "./dungeon/generate";
 import { rollBlock } from "./dungeon/drops";
 import {
-  COMMON_ENEMY_IDS,
   MAX_ENEMIES_PER_ROOM,
   SPAWNER_ACTIVE_LIMIT,
   SPAWNER_BUDGET,
   getDef,
+  rollEnemyId,
   scaledDamage,
   scaledHp,
 } from "./dungeon/enemies";
-import { SHOP_ITEMS, type ShopItemId } from "./dungeon/shop";
+import {
+  FORGE_INPUT,
+  FORGE_VARIANT_CHANCE,
+  SHOP_ITEMS,
+  forgeFee,
+  itemCost,
+  type ShopItemId,
+} from "./dungeon/shop";
+import { ForgeModal } from "./ForgeModal";
 
 const W = ROOM_W * TILE;
 const H = ROOM_H * TILE;
@@ -41,8 +49,16 @@ const START_HP = 3;
 
 type Vec = { x: number; y: number };
 type Shot = {
-  x: number; y: number; vx: number; vy: number; life: number;
-  color: string; r: number; dmg: number; hostile: boolean; pierce: boolean;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  color: string;
+  r: number;
+  dmg: number;
+  hostile: boolean;
+  pierce: boolean;
   hit?: Set<string>;
   /** empurra o inimigo atingido (px) */
   knock?: number;
@@ -52,7 +68,10 @@ type Shot = {
   homing?: number;
 };
 type Blast = {
-  x: number; y: number; t: number; hit: Set<string>;
+  x: number;
+  y: number;
+  t: number;
+  hit: Set<string>;
   hostile?: boolean;
   dmg?: number;
   speed?: number;
@@ -78,6 +97,12 @@ type Pickup = { x: number; y: number; kind: "block" | "coin"; track?: TrackId; c
 type Pedestal = { x: number; y: number; item: ShopItemId; sold: boolean };
 
 const emptyInv = (): Record<TrackId, number> => ({ kick: 0, snare: 0, hat: 0, synth: 0 });
+const emptyVarInv = (): Record<TrackId, [number, number]> => ({
+  kick: [0, 0],
+  snare: [0, 0],
+  hat: [0, 0],
+  synth: [0, 0],
+});
 
 export function NeonDungeon() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -89,6 +114,10 @@ export function NeonDungeon() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [inventory, setInventory] = useState<Record<TrackId, number>>(emptyInv);
   const [rareInventory, setRareInventory] = useState<Record<TrackId, number>>(emptyInv);
+  /** blocos de variacao A/B: obtidos apenas na Forja */
+  const [varInventory, setVarInventory] = useState<Record<TrackId, [number, number]>>(emptyVarInv);
+  const [forgeOpen, setForgeOpen] = useState(false);
+  const [forgeMsg, setForgeMsg] = useState<string | null>(null);
   const [coins, setCoins] = useState(0);
   const [bpm, setBpm] = useState(120);
   const [maxHp, setMaxHp] = useState(START_HP);
@@ -132,8 +161,6 @@ export function NeonDungeon() {
     if (mounted) setMasterVolume(settings.volume);
   }, [settings.volume, mounted]);
 
-
-
   const patternRef = useRef(pattern);
   patternRef.current = pattern;
   const floorRef = useRef(floor);
@@ -143,11 +170,13 @@ export function NeonDungeon() {
   const coinsRef = useRef(coins);
   maxHpRef.current = maxHp;
   coinsRef.current = coins;
+  const invRef = useRef(inventory);
+  invRef.current = inventory;
   const deadRef = useRef(dead);
   deadRef.current = dead;
   const frozenRef = useRef(false);
   frozenRef.current =
-    paused || editorOpen || dead || settingsOpen || hudEditing || transition !== null;
+    paused || editorOpen || dead || settingsOpen || hudEditing || forgeOpen || transition !== null;
 
   const keys = useRef<Record<string, boolean>>({});
   const player = useRef<Vec>({ x: W / 2, y: H / 2 });
@@ -168,20 +197,34 @@ export function NeonDungeon() {
   const invuln = useRef(0);
   const spikeT = useRef(0);
   const glitch = useRef(0);
+  const forgeNear = useRef(false);
 
   const room = () => floorRef.current.rooms[roomIdRef.current]!;
 
   /* ---------- editor actions ---------- */
+  /** Move blocos entre as mochilas (normal / raro / variacao A-B). */
+  const giveBlock = useCallback((track: TrackId, rare: boolean, variant: Variant, d: number) => {
+    if (rare) {
+      setRareInventory((inv) => ({ ...inv, [track]: Math.max(0, (inv[track] ?? 0) + d) }));
+    } else if (variant === 0) {
+      setInventory((inv) => ({ ...inv, [track]: Math.max(0, (inv[track] ?? 0) + d) }));
+    } else {
+      setVarInventory((inv) => {
+        const cur = inv[track] ?? [0, 0];
+        const a = cur[0] ?? 0;
+        const bq = cur[1] ?? 0;
+        const next: [number, number] =
+          variant === 1 ? [Math.max(0, a + d), bq] : [a, Math.max(0, bq + d)];
+        return { ...inv, [track]: next };
+      });
+    }
+  }, []);
+
   const placeBlock = useCallback(
     (t: number, s: number, block: { track: TrackId; rare: boolean; variant: Variant }) => {
       const prev = patternRef.current[t]?.[s] ?? null;
-      const setInv = block.rare ? setRareInventory : setInventory;
-      setInv((inv) => ({ ...inv, [block.track]: Math.max(0, (inv[block.track] ?? 0) - 1) }));
-      if (prev) {
-        const back = prev.rare ? setRareInventory : setInventory;
-        const trackId = TRACKS[t]!.id;
-        back((inv) => ({ ...inv, [trackId]: (inv[trackId] ?? 0) + 1 }));
-      }
+      giveBlock(block.track, block.rare, block.variant, -1);
+      if (prev) giveBlock(TRACKS[t]!.id, prev.rare, prev.variant, 1);
       setPattern((p) =>
         p.map((row, i) =>
           i === t
@@ -190,29 +233,48 @@ export function NeonDungeon() {
         ),
       );
     },
-    [],
+    [giveBlock],
   );
 
-  const removeBlock = useCallback((t: number, s: number) => {
-    const prev = patternRef.current[t]?.[s] ?? null;
-    if (!prev) return;
-    const trackId = TRACKS[t]!.id;
-    const back = prev.rare ? setRareInventory : setInventory;
-    back((inv) => ({ ...inv, [trackId]: (inv[trackId] ?? 0) + 1 }));
-    setPattern((p) => p.map((row, i) => (i === t ? row.map((c, j) => (j === s ? null : c)) : row)));
-  }, []);
+  const removeBlock = useCallback(
+    (t: number, s: number) => {
+      const prev = patternRef.current[t]?.[s] ?? null;
+      if (!prev) return;
+      giveBlock(TRACKS[t]!.id, prev.rare, prev.variant, 1);
+      setPattern((p) =>
+        p.map((row, i) => (i === t ? row.map((c, j) => (j === s ? null : c)) : row)),
+      );
+    },
+    [giveBlock],
+  );
 
-  const cycleVariant = useCallback((t: number, s: number) => {
-    setPattern((p) =>
-      p.map((row, i) =>
-        i === t
-          ? row.map((c, j) =>
-              j === s && c ? { ...c, variant: (((c.variant + 1) % 3) as Variant) } : c,
-            )
-          : row,
-      ),
-    );
-  }, []);
+  /* ---------- forja: unica fonte de blocos de variacao ---------- */
+  const forge = useCallback(
+    (track: TrackId) => {
+      const level = floorRef.current.level;
+      const fee = forgeFee(level);
+      if (coinsRef.current < fee || (invRef.current[track] ?? 0) < FORGE_INPUT) {
+        setForgeMsg("Blocos ou notas insuficientes.");
+        return;
+      }
+      setCoins((c) => c - fee);
+      setInventory((inv) => ({
+        ...inv,
+        [track]: Math.max(0, (inv[track] ?? 0) - FORGE_INPUT),
+      }));
+      const roll = Math.random();
+      const variant: Variant =
+        roll < FORGE_VARIANT_CHANCE ? 1 : roll < FORGE_VARIANT_CHANCE * 2 ? 2 : 0;
+      giveBlock(track, false, variant, 1);
+      setForgeMsg(
+        variant === 0
+          ? "A fusão colapsou num bloco normal."
+          : `Forjado: variação ${variant === 1 ? "A" : "B"}!`,
+      );
+      playTrack(track);
+    },
+    [giveBlock],
+  );
 
   /* ---------- helpers ---------- */
   const tileAt = (r: Room, px: number, py: number) => {
@@ -407,6 +469,9 @@ export function NeonDungeon() {
   const restart = useCallback(() => {
     setInventory(emptyInv());
     setRareInventory(emptyInv());
+    setVarInventory(emptyVarInv());
+    setForgeOpen(false);
+    setForgeMsg(null);
     setPattern(createPattern());
     setCoins(0);
     setKills(0);
@@ -449,9 +514,10 @@ export function NeonDungeon() {
   /* ---- shop purchase ---- */
   const buy = useCallback((p: Pedestal) => {
     const def = SHOP_ITEMS.find((i) => i.id === p.item)!;
-    if (p.sold || coinsRef.current < def.cost) return;
+    const cost = itemCost(def, floorRef.current.level);
+    if (p.sold || coinsRef.current < cost) return;
     p.sold = true;
-    setCoins((c) => c - def.cost);
+    setCoins((c) => c - cost);
     if (def.id === "heal") setHp((h) => Math.min(h + 1, 99));
     if (def.id === "maxhp") {
       setMaxHp((m) => m + 1);
@@ -500,7 +566,7 @@ export function NeonDungeon() {
       /* Acoes ofensivas diretas */
       if (variant === 1) {
         // Sub-Kick: disparo duplo rapido de menor dano
-          for (const off of [-0.07, 0.07])
+        for (const off of [-0.07, 0.07])
           shoot({
             vx: Math.cos(a + off) * 420,
             vy: Math.sin(a + off) * 420,
@@ -580,8 +646,15 @@ export function NeonDungeon() {
       if (variant === 2) {
         // Stun Snare: paralisa em raio curto por 1.5s
         blasts.current.push({
-          x: cx, y: cy, t: 0, hit: new Set(),
-          color: "#8ad8ff", dmg: 1, speed: 150, maxT: 0.55, stun: 1.5,
+          x: cx,
+          y: cy,
+          t: 0,
+          hit: new Set(),
+          color: "#8ad8ff",
+          dmg: 1,
+          speed: 150,
+          maxT: 0.55,
+          stun: 1.5,
         });
         for (const e of r.enemies) {
           if (Math.hypot(e.x - cx, e.y - cy) < 110) e.stun = Math.max(e.stun, 1.5);
@@ -613,7 +686,10 @@ export function NeonDungeon() {
     if (variant === 1) {
       // Beam Synth: feixe continuo durante o step
       beams.current.push({
-        x: cx, y: cy, a, t: 0,
+        x: cx,
+        y: cy,
+        a,
+        t: 0,
         life: Math.max(0.12, stepDur),
         dmg: 4 * dMul,
         tick: 0,
@@ -624,14 +700,27 @@ export function NeonDungeon() {
       // Vamp Bass: janela de cura ao derrotar inimigos sob o som
       vamp.current = 2;
       pools.current.push({
-        x: cx, y: cy, r: 70 * sMul, t: 0, life: 2, dmg: 1.5 * dMul, tick: 0, push: 34,
+        x: cx,
+        y: cy,
+        r: 70 * sMul,
+        t: 0,
+        life: 2,
+        dmg: 1.5 * dMul,
+        tick: 0,
+        push: 34,
       });
       return;
     }
     // Base: poca de som no chao por 2s
     pools.current.push({
-      x: cx + f.x * 40, y: cy + f.y * 40,
-      r: 62 * sMul, t: 0, life: 2, dmg: 3 * dMul, tick: 0, push: 40,
+      x: cx + f.x * 40,
+      y: cy + f.y * 40,
+      r: 62 * sMul,
+      t: 0,
+      life: 2,
+      dmg: 3 * dMul,
+      tick: 0,
+      push: 40,
     });
   }, []);
 
@@ -657,10 +746,16 @@ export function NeonDungeon() {
           const dy = target.y - e.y;
           const d = Math.hypot(dx, dy) || 1;
           shots.current.push({
-            x: e.x, y: e.y,
-            vx: (dx / d) * 900, vy: (dy / d) * 900,
-            life: 1.4, color: "#ff2e5b", r: 4, dmg: e.damage,
-            hostile: true, pierce: false,
+            x: e.x,
+            y: e.y,
+            vx: (dx / d) * 900,
+            vy: (dy / d) * 900,
+            life: 1.4,
+            color: "#ff2e5b",
+            r: 4,
+            dmg: e.damage,
+            hostile: true,
+            pierce: false,
           });
           e.lock = null;
         } else {
@@ -669,17 +764,17 @@ export function NeonDungeon() {
       }
       if (e.behavior === "INFECTED_SPEAKER_SPAWNER" && e.steps % 8 === 0) {
         const spawned = e.spawned ?? 0;
-        if (
-          budget > 0 &&
-          spawned < SPAWNER_BUDGET &&
-          r.enemies.length < MAX_ENEMIES_PER_ROOM
-        ) {
-          const id = COMMON_ENEMY_IDS[Math.floor(Math.random() * COMMON_ENEMY_IDS.length)]!;
-          const def = getDef(id);
+        if (budget > 0 && spawned < SPAWNER_BUDGET && r.enemies.length < MAX_ENEMIES_PER_ROOM) {
+          const def = getDef(rollEnemyId(floorRef.current.level));
           const lvl = floorRef.current.level;
           const hp = scaledHp(def.hpBase, lvl);
           const ang = Math.random() * Math.PI * 2;
-          const size = def.id === "bass_dropper" ? 36 : 26;
+          const size =
+            def.id === "bass_dropper" || def.id === "bass_dropper_quake"
+              ? 36
+              : def.variant
+                ? 30
+                : 26;
           const spot = safeDropSpot(r, e.x + Math.cos(ang) * 46, e.y + Math.sin(ang) * 46);
           budget -= 1;
           e.spawned = spawned + 1;
@@ -830,11 +925,15 @@ export function NeonDungeon() {
         const half = SIZE / 2 - 3;
         const nx = player.current.x + dx * SPEED * dt;
         const ny = player.current.y + dy * SPEED * dt;
-        if (!solidFor(r, nx + Math.sign(dx) * half, player.current.y + half * 0.6) &&
-            !solidFor(r, nx + Math.sign(dx) * half, player.current.y - half * 0.6))
+        if (
+          !solidFor(r, nx + Math.sign(dx) * half, player.current.y + half * 0.6) &&
+          !solidFor(r, nx + Math.sign(dx) * half, player.current.y - half * 0.6)
+        )
           player.current.x = nx;
-        if (!solidFor(r, player.current.x + half * 0.6, ny + Math.sign(dy) * half) &&
-            !solidFor(r, player.current.x - half * 0.6, ny + Math.sign(dy) * half))
+        if (
+          !solidFor(r, player.current.x + half * 0.6, ny + Math.sign(dy) * half) &&
+          !solidFor(r, player.current.x - half * 0.6, ny + Math.sign(dy) * half)
+        )
           player.current.y = ny;
       }
 
@@ -920,9 +1019,20 @@ export function NeonDungeon() {
           const near = Math.hypot(p.x - player.current.x, p.y - player.current.y) < 34;
           if (near) {
             const def = SHOP_ITEMS.find((i) => i.id === p.item)!;
-            if (coinsRef.current >= def.cost) buy(p);
+            if (coinsRef.current >= itemCost(def, floorRef.current.level)) buy(p);
           }
         }
+
+        /* Forja: abre ao encostar no altar (semi-rara) */
+        if (r.type === "FORGE") {
+          const near2 = Math.hypot(player.current.x - W / 2, player.current.y - (H / 2 - 20)) < 46;
+          if (near2 && !forgeNear.current) {
+            forgeNear.current = true;
+            setForgeMsg(null);
+            setForgeOpen(true);
+          }
+          if (!near2) forgeNear.current = false;
+        } else forgeNear.current = false;
       }
 
       /* enemies */
@@ -946,7 +1056,7 @@ export function NeonDungeon() {
             continue;
           }
           const spd = e.behavior === "SIREN_SPEED_AURA" ? 1 : auraMul;
-          const flying = e.behavior === "FLY_IGNORES_CHASMS";
+          const flying = e.behavior === "FLY_IGNORES_CHASMS" || e.behavior === "FLY_TELEPORT_BLINK";
           const ex = player.current.x - e.x;
           const ey = player.current.y - e.y;
           const dist = Math.hypot(ex, ey) || 1;
@@ -956,7 +1066,10 @@ export function NeonDungeon() {
             flying ||
             e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES" ||
             e.behavior === "BASS_DROP_SHOCKWAVE" ||
-            e.behavior === "SIREN_SPEED_AURA"
+            e.behavior === "SIREN_SPEED_AURA" ||
+            e.behavior === "DASH_CHARGE" ||
+            e.behavior === "SIREN_HEALER" ||
+            e.behavior === "BASS_QUAKE_DOUBLE"
           ) {
             const nx = e.x + (ex / dist) * e.speed * spd * dt;
             const ny = e.y + (ey / dist) * e.speed * spd * dt;
@@ -965,11 +1078,139 @@ export function NeonDungeon() {
           }
           clampToRoom(e);
 
-          if (e.behavior === "SHOOT_AT_PLAYER_PERIODIC" || e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
+          /* ---------- variantes elite ---------- */
+          if (e.behavior === "DASH_CHARGE") {
+            /* investida reta em alta velocidade */
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if ((e.dashT ?? 0) > 0) {
+              e.dashT = Math.max(0, (e.dashT ?? 0) - dt);
+              const nx = e.x + (e.dvx ?? 0) * 520 * dt;
+              const ny = e.y + (e.dvy ?? 0) * 520 * dt;
+              if (!enemyBlocked(cur, nx, e.y, false, e.size)) e.x = nx;
+              else e.dashT = 0;
+              if (!enemyBlocked(cur, e.x, ny, false, e.size)) e.y = ny;
+              else e.dashT = 0;
+              clampToRoom(e);
+            } else if (e.cooldown <= 0 && dist < 320) {
+              e.cooldown = getDef(e.defId).fireRate ?? 2.2;
+              e.dashT = 0.3;
+              e.dvx = ex / dist;
+              e.dvy = ey / dist;
+              e.hitFlash = 0.12;
+            }
+          }
+
+          if (e.behavior === "SHOOT_SPREAD_BURST") {
+            /* rajada tripla em leque */
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = getDef(e.defId).fireRate ?? 2.4;
+              if (dist < 620 && hasLineOfSight(cur, e.x, e.y, player.current.x, player.current.y)) {
+                const base = Math.atan2(ey, ex);
+                for (const off of [-0.24, 0, 0.24])
+                  shots.current.push({
+                    x: e.x,
+                    y: e.y,
+                    vx: Math.cos(base + off) * 300,
+                    vy: Math.sin(base + off) * 300,
+                    life: 2.4,
+                    color: e.color,
+                    r: 4,
+                    dmg: e.damage,
+                    hostile: true,
+                    pierce: false,
+                  });
+              }
+            }
+          }
+
+          if (e.behavior === "FLY_TELEPORT_BLINK") {
+            /* pisca para perto do jogador */
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = getDef(e.defId).fireRate ?? 2.8;
+              const ang = Math.random() * Math.PI * 2;
+              const spot = safeDropSpot(
+                cur,
+                player.current.x + Math.cos(ang) * 76,
+                player.current.y + Math.sin(ang) * 76,
+              );
+              e.x = spot.x;
+              e.y = spot.y;
+              clampToRoom(e);
+              e.spawnT = 0.2;
+              e.hitFlash = 0.2;
+            }
+          }
+
+          if (e.behavior === "SIREN_HEALER") {
+            /* cura aliados proximos em pulsos */
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = getDef(e.defId).fireRate ?? 3;
+              let healed = false;
+              for (const o of cur.enemies) {
+                if (o.uid === e.uid || o.hp <= 0 || o.hp >= o.maxHp) continue;
+                if (Math.hypot(o.x - e.x, o.y - e.y) < 170) {
+                  o.hp = Math.min(o.maxHp, o.hp + Math.ceil(o.maxHp * 0.12));
+                  healed = true;
+                }
+              }
+              if (healed)
+                blasts.current.push({
+                  x: e.x,
+                  y: e.y,
+                  t: 0,
+                  hit: new Set(),
+                  dmg: 0,
+                  speed: 210,
+                  maxT: 0.55,
+                  color: "#ff5fa8",
+                });
+            }
+          }
+
+          if (e.behavior === "BASS_QUAKE_DOUBLE") {
+            /* onda dupla concentrica */
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = getDef(e.defId).fireRate ?? 3.2;
+              if (dist < 240) {
+                blasts.current.push({
+                  x: e.x,
+                  y: e.y,
+                  t: 0,
+                  hit: new Set(),
+                  hostile: true,
+                  dmg: e.damage,
+                  speed: 320,
+                  maxT: 0.6,
+                  color: "#ff9500",
+                });
+                blasts.current.push({
+                  x: e.x,
+                  y: e.y,
+                  t: 0,
+                  hit: new Set(),
+                  hostile: true,
+                  dmg: e.damage,
+                  speed: 170,
+                  maxT: 0.95,
+                  color: "#ffbd55",
+                });
+              }
+            }
+          }
+
+          if (
+            e.behavior === "SHOOT_AT_PLAYER_PERIODIC" ||
+            e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES"
+          ) {
             const boss = e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES";
             e.cooldown = Math.max(-0.5, e.cooldown - dt);
             const canSee =
-              boss || (dist < 620 && hasLineOfSight(cur, e.x, e.y, player.current.x, player.current.y));
+              boss ||
+              (dist < 620 && hasLineOfSight(cur, e.x, e.y, player.current.x, player.current.y));
             if (e.cooldown <= 0) {
               /* recarrega sempre, mesmo sem tiro: evita rajadas infinitas */
               if (!boss) e.cooldown = getDef(e.defId).fireRate ?? 2;
@@ -982,11 +1223,7 @@ export function NeonDungeon() {
                 const pat = (e.spawned ?? 0) % 4;
                 e.spawned = (e.spawned ?? 0) + 1;
                 e.cooldown = phase === 2 ? 0.75 : phase === 1 ? 1.0 : 1.3;
-                const bshot = (
-                  ang: number,
-                  spd: number,
-                  extra: Partial<Shot> = {},
-                ) =>
+                const bshot = (ang: number, spd: number, extra: Partial<Shot> = {}) =>
                   shots.current.push({
                     x: e.x,
                     y: e.y,
@@ -1026,9 +1263,15 @@ export function NeonDungeon() {
                 } else {
                   /* onda de choque + parede de sub-bass */
                   blasts.current.push({
-                    x: e.x, y: e.y, t: 0, hit: new Set(),
-                    hostile: true, dmg: e.damage, speed: 300 + phase * 60,
-                    maxT: 0.75, color: e.color,
+                    x: e.x,
+                    y: e.y,
+                    t: 0,
+                    hit: new Set(),
+                    hostile: true,
+                    dmg: e.damage,
+                    speed: 300 + phase * 60,
+                    maxT: 0.75,
+                    color: e.color,
                   });
                   const n = 8 + phase * 4;
                   for (let i = 0; i < n; i++)
@@ -1038,7 +1281,18 @@ export function NeonDungeon() {
                       bshot((i / 12) * Math.PI * 2 + 0.26, 150, { life: 3.2 });
                 }
               } else {
-                shots.current.push({ x: e.x, y: e.y, vx: (ex / dist) * 260, vy: (ey / dist) * 260, life: 2.4, color: e.color, r: 4.5, dmg: e.damage, hostile: true, pierce: false });
+                shots.current.push({
+                  x: e.x,
+                  y: e.y,
+                  vx: (ex / dist) * 260,
+                  vy: (ey / dist) * 260,
+                  life: 2.4,
+                  color: e.color,
+                  r: 4.5,
+                  dmg: e.damage,
+                  hostile: true,
+                  pierce: false,
+                });
               }
             }
           }
@@ -1050,9 +1304,16 @@ export function NeonDungeon() {
               e.cooldown = 2.6;
               if (dist < 190)
                 blasts.current.push({
-                x: e.x, y: e.y, t: 0, hit: new Set(),
-                hostile: true, dmg: e.damage, speed: 260, maxT: 0.6, color: "#ff6a00",
-              });
+                  x: e.x,
+                  y: e.y,
+                  t: 0,
+                  hit: new Set(),
+                  hostile: true,
+                  dmg: e.damage,
+                  speed: 260,
+                  maxT: 0.6,
+                  color: "#ff6a00",
+                });
             }
           }
 
@@ -1107,8 +1368,14 @@ export function NeonDungeon() {
             if (!s.hostile) hitPillar(cur, s.x, s.y, s.dmg);
             if (s.explode)
               blasts.current.push({
-                x: s.x, y: s.y, t: 0, hit: new Set(),
-                dmg: s.dmg * 1.5, speed: 300, maxT: 0.4, color: s.color,
+                x: s.x,
+                y: s.y,
+                t: 0,
+                hit: new Set(),
+                dmg: s.dmg * 1.5,
+                speed: 300,
+                maxT: 0.4,
+                color: s.color,
               });
             return false;
           }
@@ -1135,8 +1402,14 @@ export function NeonDungeon() {
                 }
                 if (s.explode) {
                   blasts.current.push({
-                    x: s.x, y: s.y, t: 0, hit: new Set(),
-                    dmg: s.dmg * 1.5, speed: 300, maxT: 0.4, color: s.color,
+                    x: s.x,
+                    y: s.y,
+                    t: 0,
+                    hit: new Set(),
+                    dmg: s.dmg * 1.5,
+                    speed: 300,
+                    maxT: 0.4,
+                    color: s.color,
                   });
                   return false;
                 }
@@ -1325,8 +1598,7 @@ export function NeonDungeon() {
             ctx.fillRect(px + 6, py + TILE - 9, (TILE - 12) * hpLeft, 3);
             ctx.restore();
           } else if (id === T.BPM_UP || id === T.BPM_DOWN || id === T.AMPLIFIER) {
-            const col =
-              id === T.BPM_UP ? "#ff2e5b" : id === T.BPM_DOWN ? "#2ec8ff" : "#b14dff";
+            const col = id === T.BPM_UP ? "#ff2e5b" : id === T.BPM_DOWN ? "#2ec8ff" : "#b14dff";
             ctx.save();
             ctx.globalAlpha = 0.35 + Math.sin(now / 260) * 0.15;
             ctx.strokeStyle = col;
@@ -1396,9 +1668,29 @@ export function NeonDungeon() {
           ctx.fillStyle = def.color;
           ctx.fillText(p.sold ? "VENDIDO" : def.label.toUpperCase(), p.x, p.y - 26);
           ctx.fillStyle = "#ffe23d";
-          ctx.fillText(p.sold ? "" : `${def.cost} ♪`, p.x, p.y + 34);
+          ctx.fillText(p.sold ? "" : `${itemCost(def, floorRef.current.level)} ♪`, p.x, p.y + 34);
           ctx.globalAlpha = 1;
         }
+        ctx.restore();
+      }
+
+      /* forja: altar ritmico */
+      if (cur.type === "FORGE") {
+        const ax = W / 2;
+        const ay = H / 2 - 20;
+        ctx.save();
+        ctx.shadowBlur = 22;
+        ctx.shadowColor = "#ffe23d";
+        ctx.strokeStyle = "#ffe23d";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(ax - 22, ay - 18, 44, 36);
+        ctx.globalAlpha = 0.5 + Math.sin(now / 200) * 0.3;
+        ctx.fillStyle = "#ffe23d";
+        ctx.fillRect(ax - 10, ay - 8, 20, 16);
+        ctx.globalAlpha = 1;
+        ctx.font = "8px 'Press Start 2P', monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("FORJA", ax, ay - 28);
         ctx.restore();
       }
 
@@ -1729,7 +2021,6 @@ export function NeonDungeon() {
           />
         )}
 
-
         {transition && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/90 font-pixel text-[10px] uppercase text-neon-cyan">
             {transition}
@@ -1754,12 +2045,24 @@ export function NeonDungeon() {
             pattern={pattern}
             inventory={inventory}
             rareInventory={rareInventory}
+            varInventory={varInventory}
             bpm={bpm}
             currentStep={currentStep}
             onPlace={placeBlock}
             onRemove={removeBlock}
-            onCycleVariant={cycleVariant}
             onClose={() => setEditorOpen(false)}
+          />
+        )}
+
+        {forgeOpen && !dead && (
+          <ForgeModal
+            level={floor.level}
+            coins={coins}
+            inventory={inventory}
+            varInventory={varInventory}
+            message={forgeMsg}
+            onForge={forge}
+            onClose={() => setForgeOpen(false)}
           />
         )}
 

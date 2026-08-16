@@ -11,8 +11,18 @@ export function Minimap({ floor, currentId }: { floor: Floor; currentId: string 
       {cells.map(({ x, y }) => {
         const room = floor.rooms[`${x},${y}`];
         const active = room?.id === currentId;
-        const visited = room && room.state !== "UNVISITED";
-        const icon = room?.type === "SHOP" ? "$" : room?.type === "BOSS" ? "☠" : "";
+        const visited = !!room && room.state !== "UNVISITED";
+        /* Fog of war: so salas ja visitadas aparecem no minimapa */
+        const known = visited || active;
+        const icon = !known
+          ? ""
+          : room?.type === "SHOP"
+            ? "$"
+            : room?.type === "FORGE"
+              ? "⚒"
+              : room?.type === "BOSS"
+                ? "☠"
+                : "";
         return (
           <div
             key={`${x},${y}`}
@@ -20,8 +30,8 @@ export function Minimap({ floor, currentId }: { floor: Floor; currentId: string 
               active ? "animate-pulse" : ""
             }`}
             style={{
-              borderColor: room ? (active ? "#2ec8ff" : "#ffffff22") : "transparent",
-              background: room ? (active ? "#2ec8ff33" : visited ? "#8b93a833" : "#ffffff0d") : "transparent",
+              borderColor: known ? (active ? "#2ec8ff" : "#ffffff22") : "transparent",
+              background: known ? (active ? "#2ec8ff33" : "#8b93a833") : "transparent",
               color: active ? "#2ec8ff" : "#8b93a8",
               boxShadow: active ? "0 0 10px #2ec8ff" : "none",
             }}
