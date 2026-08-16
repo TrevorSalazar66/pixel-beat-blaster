@@ -191,7 +191,8 @@ export const rollEnemyId = (floor: number) =>
 export const getDef = (id: string) => ENEMY_DEFS.find((e) => e.id === id) ?? ENEMY_DEFS[0]!;
 
 /** Infinite difficulty scaling */
-export const scaledHp = (base: number, floor: number) => Math.round(base * (1 + (floor - 1) * 0.25));
+export const scaledHp = (base: number, floor: number) =>
+  Math.round(base * (1 + (floor - 1) * 0.25));
 export const scaledDamage = (base: number, floor: number) => base + Math.floor((floor - 1) / 3);
 /** Limite duro de inimigos vivos por sala. */
 export const MAX_ENEMIES_PER_ROOM = 12;

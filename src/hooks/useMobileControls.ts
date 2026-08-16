@@ -22,8 +22,7 @@ export function detectDevice(): DeviceDetection {
 export function useOrientation(): Orientation {
   const [o, setO] = useState<Orientation>("PORTRAIT");
   useEffect(() => {
-    const read = () =>
-      setO(window.innerWidth >= window.innerHeight ? "LANDSCAPE" : "PORTRAIT");
+    const read = () => setO(window.innerWidth >= window.innerHeight ? "LANDSCAPE" : "PORTRAIT");
     read();
     window.addEventListener("resize", read);
     const so = window.screen?.orientation;

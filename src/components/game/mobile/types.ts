@@ -104,12 +104,7 @@ export function toAnchored(xPct: number, yPct: number): AnchoredPos {
   if (vert === "MID") anchor = (horiz === "RIGHT" ? "MID_RIGHT" : "MID_LEFT") as Anchor;
   else anchor = `${vert}_${horiz}` as Anchor;
 
-  const dx =
-    anchor.endsWith("LEFT")
-      ? xPct
-      : anchor.endsWith("RIGHT")
-        ? xPct - 100
-        : xPct - 50;
+  const dx = anchor.endsWith("LEFT") ? xPct : anchor.endsWith("RIGHT") ? xPct - 100 : xPct - 50;
   const dy = anchor.startsWith("TOP") ? yPct : anchor.startsWith("BOTTOM") ? yPct - 100 : yPct - 50;
   return { anchor, dx, dy };
 }

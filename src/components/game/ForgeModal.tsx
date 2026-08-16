@@ -41,8 +41,8 @@ export function ForgeModal({
 
       <p className="font-pixel text-[7px] leading-relaxed text-muted-foreground">
         Junte {FORGE_INPUT} blocos normais iguais + taxa de {fee} ♪ (andar B{level}). Resultado:{" "}
-        {100 - pct * 2}% bloco normal · {pct}% variação A · {pct}% variação B. Blocos já colocados no
-        sequenciador têm variação fixa.
+        {100 - pct * 2}% bloco normal · {pct}% variação A · {pct}% variação B. Blocos já colocados
+        no sequenciador têm variação fixa.
       </p>
 
       <div className="grid gap-2 sm:grid-cols-2">

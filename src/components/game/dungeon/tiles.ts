@@ -37,9 +37,27 @@ export const TILE_PROPS: Record<number, TileProps> = {
   [T.DOOR]: { id: T.DOOR, name: "Porta", solid: false, blocksShots: false, color: "#101828" },
   [T.PORTAL]: { id: T.PORTAL, name: "Portal", solid: false, blocksShots: false, color: "#160b24" },
   [T.PILLAR]: { id: T.PILLAR, name: "Pilar", solid: true, blocksShots: true, color: "#2b2f4d" },
-  [T.BPM_UP]: { id: T.BPM_UP, name: "Piso Acelerador", solid: false, blocksShots: false, color: "#2a1420" },
-  [T.BPM_DOWN]: { id: T.BPM_DOWN, name: "Piso Desacelerador", solid: false, blocksShots: false, color: "#101c2a" },
-  [T.AMPLIFIER]: { id: T.AMPLIFIER, name: "Piso Amplificador", solid: false, blocksShots: false, color: "#241a2e" },
+  [T.BPM_UP]: {
+    id: T.BPM_UP,
+    name: "Piso Acelerador",
+    solid: false,
+    blocksShots: false,
+    color: "#2a1420",
+  },
+  [T.BPM_DOWN]: {
+    id: T.BPM_DOWN,
+    name: "Piso Desacelerador",
+    solid: false,
+    blocksShots: false,
+    color: "#101c2a",
+  },
+  [T.AMPLIFIER]: {
+    id: T.AMPLIFIER,
+    name: "Piso Amplificador",
+    solid: false,
+    blocksShots: false,
+    color: "#241a2e",
+  },
 };
 
 /** Pilares destrutiveis comecam com esta vida. */

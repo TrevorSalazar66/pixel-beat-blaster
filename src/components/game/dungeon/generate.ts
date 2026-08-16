@@ -288,7 +288,8 @@ export function spawnEnemies(room: Room, level: number): Enemy[] {
   const spots: { x: number; y: number }[] = [];
   for (let y = 2; y < ROOM_H - 2; y++)
     for (let x = 2; x < ROOM_W - 2; x++)
-      if (room.tiles[y]![x] === T.FLOOR) spots.push({ x: x * TILE + TILE / 2, y: y * TILE + TILE / 2 });
+      if (room.tiles[y]![x] === T.FLOOR)
+        spots.push({ x: x * TILE + TILE / 2, y: y * TILE + TILE / 2 });
 
   if (room.type === "BOSS") {
     const boss = makeEnemy(

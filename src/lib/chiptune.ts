@@ -76,9 +76,15 @@ export function playTrack(track: TrackId, time?: number, variant: 0 | 1 | 2 = 0)
     const g = ac.createGain();
     osc.type = variant === 2 ? "sawtooth" : "square";
     osc.frequency.setValueAtTime(variant === 1 ? 200 : variant === 2 ? 130 : 160, t);
-    osc.frequency.exponentialRampToValueAtTime(variant === 2 ? 28 : 40, t + (variant === 1 ? 0.1 : 0.16));
+    osc.frequency.exponentialRampToValueAtTime(
+      variant === 2 ? 28 : 40,
+      t + (variant === 1 ? 0.1 : 0.16),
+    );
     g.gain.setValueAtTime(0.9, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + (variant === 1 ? 0.12 : variant === 2 ? 0.26 : 0.18));
+    g.gain.exponentialRampToValueAtTime(
+      0.001,
+      t + (variant === 1 ? 0.12 : variant === 2 ? 0.26 : 0.18),
+    );
     osc.connect(g).connect(dest);
     osc.start(t);
     osc.stop(t + 0.32);

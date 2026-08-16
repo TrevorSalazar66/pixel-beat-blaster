@@ -47,10 +47,10 @@ export function SequencerEditor({
       if (sel.track !== trackId) return;
       onPlace(t, s, sel);
       const left = sel.rare
-        ? rareInventory[sel.track] ?? 0
+        ? (rareInventory[sel.track] ?? 0)
         : sel.variant === 0
-          ? inventory[sel.track] ?? 0
-          : (varInventory[sel.track] ?? [0, 0])[sel.variant - 1] ?? 0;
+          ? (inventory[sel.track] ?? 0)
+          : ((varInventory[sel.track] ?? [0, 0])[sel.variant - 1] ?? 0);
       if (left - 1 <= 0) setSel(null);
     } else if (cell) {
       onRemove(t, s);
@@ -146,10 +146,10 @@ export function SequencerEditor({
             ).map(({ rare, variant }) => {
               const vars = varInventory[track.id] ?? [0, 0];
               const count = rare
-                ? rareInventory[track.id] ?? 0
+                ? (rareInventory[track.id] ?? 0)
                 : variant === 0
-                  ? inventory[track.id] ?? 0
-                  : vars[variant - 1] ?? 0;
+                  ? (inventory[track.id] ?? 0)
+                  : (vars[variant - 1] ?? 0);
               if (count <= 0) return null;
               const active =
                 sel?.track === track.id && sel.rare === rare && sel.variant === variant;
