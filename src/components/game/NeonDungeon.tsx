@@ -1772,7 +1772,27 @@ export function NeonDungeon() {
           }
           setKills((v) => v + dying.length);
           cur.enemies = cur.enemies.filter((e) => e.hp > 0);
-          if (cur.enemies.length === 0 && cur.state === "COMBAT") clearRoom(cur);
+          if (cur.enemies.length === 0 && cur.state === "COMBAT") {
+            /* 25% de chance de emboscada pentagonal ao limpar a sala */
+            if (cur.type === "NORMAL" && !cur.ambushed && Math.random() < AMBUSH_CHANCE) {
+              cur.ambushed = true;
+              const ang = Math.random() * Math.PI * 2;
+              const spot = safeDropSpot(
+                cur,
+                player.current.x + Math.cos(ang) * 200,
+                player.current.y + Math.sin(ang) * 200,
+              );
+              const amb = makeEnemy(
+                "pentagon_ambusher",
+                spot.x,
+                spot.y,
+                floorRef.current.level,
+              );
+              amb.spawnT = 1;
+              cur.enemies.push(amb);
+              glitch.current = 0.6;
+            } else clearRoom(cur);
+          }
         }
 
         shield.current = Math.max(0, shield.current - dt);
