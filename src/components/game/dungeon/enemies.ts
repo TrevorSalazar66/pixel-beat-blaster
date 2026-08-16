@@ -6,7 +6,13 @@ export type Behavior =
   | "SIREN_SPEED_AURA"
   | "BASS_DROP_SHOCKWAVE"
   | "LASER_SNIPER_LOCK"
-  | "INFECTED_SPEAKER_SPAWNER";
+  | "INFECTED_SPEAKER_SPAWNER"
+  /* variantes */
+  | "DASH_CHARGE"
+  | "SHOOT_SPREAD_BURST"
+  | "FLY_TELEPORT_BLINK"
+  | "SIREN_HEALER"
+  | "BASS_QUAKE_DOUBLE";
 
 export type EnemyDef = {
   id: string;
@@ -17,6 +23,8 @@ export type EnemyDef = {
   behavior: Behavior;
   fireRate?: number;
   color: string;
+  /** inimigo variante (elite) */
+  variant?: boolean;
 };
 
 export const ENEMY_DEFS: EnemyDef[] = [
@@ -94,6 +102,62 @@ export const ENEMY_DEFS: EnemyDef[] = [
     behavior: "INFECTED_SPEAKER_SPAWNER",
     color: "#3dff9e",
   },
+  /* ---------- variantes (elites) ---------- */
+  {
+    id: "chaser_neon_elite",
+    name: "Perseguidor Distorcido",
+    hpBase: 22,
+    damageBase: 2,
+    speed: 2.0,
+    behavior: "DASH_CHARGE",
+    fireRate: 2.2,
+    color: "#ff3ad0",
+    variant: true,
+  },
+  {
+    id: "turret_pixel_burst",
+    name: "Torre Tripla",
+    hpBase: 26,
+    damageBase: 1,
+    speed: 0,
+    behavior: "SHOOT_SPREAD_BURST",
+    fireRate: 2.4,
+    color: "#00e0ff",
+    variant: true,
+  },
+  {
+    id: "floater_glitch_blink",
+    name: "Glitch Teleporte",
+    hpBase: 14,
+    damageBase: 1,
+    speed: 1.6,
+    behavior: "FLY_TELEPORT_BLINK",
+    fireRate: 2.8,
+    color: "#eaff00",
+    variant: true,
+  },
+  {
+    id: "siren_healer",
+    name: "Siren Curandeira",
+    hpBase: 20,
+    damageBase: 1,
+    speed: 1.5,
+    behavior: "SIREN_HEALER",
+    fireRate: 3.0,
+    color: "#ff5fa8",
+    variant: true,
+  },
+  {
+    id: "bass_dropper_quake",
+    name: "Bass-Quake",
+    hpBase: 46,
+    damageBase: 2,
+    speed: 0.9,
+    behavior: "BASS_QUAKE_DOUBLE",
+    fireRate: 3.2,
+    color: "#ff9500",
+    variant: true,
+  },
 ];
 
 /** Inimigos que aparecem no sorteio normal das salas. */
@@ -105,6 +169,24 @@ export const COMMON_ENEMY_IDS = [
   "bass_dropper",
   "laser_sniper",
 ];
+
+/** Variantes elite: sorteadas com chance menor conforme o andar. */
+export const VARIANT_ENEMY_IDS = [
+  "chaser_neon_elite",
+  "turret_pixel_burst",
+  "floater_glitch_blink",
+  "siren_healer",
+  "bass_dropper_quake",
+];
+
+/** Chance de um slot de inimigo virar variante elite. */
+export const variantChance = (floor: number) => Math.min(0.4, 0.08 + (floor - 1) * 0.05);
+
+/** Sorteia um id de inimigo comum ou variante. */
+export const rollEnemyId = (floor: number) =>
+  Math.random() < variantChance(floor)
+    ? VARIANT_ENEMY_IDS[Math.floor(Math.random() * VARIANT_ENEMY_IDS.length)]!
+    : COMMON_ENEMY_IDS[Math.floor(Math.random() * COMMON_ENEMY_IDS.length)]!;
 
 export const getDef = (id: string) => ENEMY_DEFS.find((e) => e.id === id) ?? ENEMY_DEFS[0]!;
 
@@ -146,4 +228,8 @@ export type Enemy = {
   vamp: number;
   /** quantos inimigos esta estrutura ja invocou (limite de spawner) */
   spawned?: number;
+  /** investida ativa (DASH_CHARGE): tempo restante */
+  dashT?: number;
+  dvx?: number;
+  dvy?: number;
 };
