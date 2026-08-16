@@ -38,11 +38,15 @@ jobs:
       - name: Build Application
         run: npm run build
         env:
-          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
-          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_FIREBASE_API_KEY: AIzaSyA2t2W3J-4yt5Ls4fJerEAju8-_swmDz6c
+          VITE_FIREBASE_AUTH_DOMAIN: neondungeon-40096.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: neondungeon-40096
+          VITE_FIREBASE_STORAGE_BUCKET: neondungeon-40096.firebasestorage.app
+          VITE_FIREBASE_MESSAGING_SENDER_ID: 985976256444
+          VITE_FIREBASE_APP_ID: 1:985976256444:web:133cad565a2503b2335db9
+          VITE_FIREBASE_MEASUREMENT_ID: G-RPQ8QX3KBQ
+          VITE_SUPABASE_URL: https://anmavjztbnmykysjhtnc.supabase.com
+          VITE_SUPABASE_ANON_KEY: sb_publishable_wc99MIe9m4-PPv8cLfzxyw_oBCxbGGq
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

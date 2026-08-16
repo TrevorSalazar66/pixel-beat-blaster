@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getAudio, playDeath, playTrack, setMasterVolume, type TrackId } from "@/lib/chiptune";
+import { auth } from "@/lib/firebase";
+import { saveRunData } from "@/lib/supabase";
 import { TouchControls } from "./mobile/TouchControls";
 import { MobileHUD } from "./mobile/MobileHUD";
 import { SettingsModal } from "./mobile/SettingsModal";
@@ -241,10 +243,23 @@ export function NeonDungeon() {
         deadRef.current = true;
         glitch.current = 1;
         playDeath();
+        
+        // Salva pontuação no Supabase
+        const activeUser = auth.currentUser;
+        saveRunData({
+          user_id: activeUser?.uid || "guest",
+          floor_reached: floorRef.current.level,
+          kills: kills,
+          coins: coinsRef.current,
+          bpm: bpmRef.current,
+          notes_count: countNotes(patternRef.current),
+          pattern_data: JSON.stringify(patternRef.current),
+        });
       }
       return n;
     });
-  }, []);
+  }, [kills]);
+
 
   const clearRoom = useCallback((r: Room) => {
     r.state = "CLEARED";
@@ -1887,6 +1902,7 @@ export function NeonDungeon() {
             </div>
           </div>
         )}
+
 
 
         {inCombat && (
