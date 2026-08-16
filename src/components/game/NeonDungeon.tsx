@@ -22,7 +22,15 @@ import {
   type Room,
 } from "./dungeon/generate";
 import { rollBlock } from "./dungeon/drops";
-import { COMMON_ENEMY_IDS, getDef, scaledDamage, scaledHp } from "./dungeon/enemies";
+import {
+  COMMON_ENEMY_IDS,
+  MAX_ENEMIES_PER_ROOM,
+  SPAWNER_ACTIVE_LIMIT,
+  SPAWNER_BUDGET,
+  getDef,
+  scaledDamage,
+  scaledHp,
+} from "./dungeon/enemies";
 import { SHOP_ITEMS, type ShopItemId } from "./dungeon/shop";
 
 const W = ROOM_W * TILE;
@@ -218,6 +226,70 @@ export function NeonDungeon() {
   };
 
   const bump = () => setFloor((f) => ({ ...f }));
+
+  /** Tile onde um inimigo ou item pode existir (portas/portais nao contam). */
+  const passableForEnemy = (r: Room, px: number, py: number, flying: boolean) => {
+    const tx = Math.floor(px / TILE);
+    const ty = Math.floor(py / TILE);
+    if (tx < 1 || ty < 1 || tx > ROOM_W - 2 || ty > ROOM_H - 2) return false;
+    const id = r.tiles[ty]![tx]!;
+    if (id === T.DOOR || id === T.PORTAL) return false;
+    if (id === T.CHASM) return flying;
+    return !(TILE_PROPS[id]?.solid ?? true);
+  };
+
+  /** Colisao do inimigo considerando o corpo inteiro: nunca sai da sala. */
+  const enemyBlocked = (r: Room, px: number, py: number, flying: boolean, size: number) => {
+    const h = Math.max(6, size / 2 - 4);
+    return (
+      !passableForEnemy(r, px - h, py - h, flying) ||
+      !passableForEnemy(r, px + h, py - h, flying) ||
+      !passableForEnemy(r, px - h, py + h, flying) ||
+      !passableForEnemy(r, px + h, py + h, flying)
+    );
+  };
+
+  /** Mantem o inimigo dentro dos limites internos da sala. */
+  const clampToRoom = (e: { x: number; y: number; size: number }) => {
+    const h = e.size / 2;
+    e.x = Math.min(Math.max(e.x, TILE + h), W - TILE - h);
+    e.y = Math.min(Math.max(e.y, TILE + h), H - TILE - h);
+  };
+
+  /** Linha de visao: inimigos so atiram se houver caminho livre. */
+  const hasLineOfSight = (r: Room, ax: number, ay: number, bx: number, by: number) => {
+    const d = Math.hypot(bx - ax, by - ay) || 1;
+    for (let t = 16; t < d; t += 14) {
+      if (blocksShot(r, ax + ((bx - ax) / d) * t, ay + ((by - ay) / d) * t)) return false;
+    }
+    return true;
+  };
+
+  /** Procura o piso acessivel mais proximo para nao dropar item em buraco/parede. */
+  const safeDropSpot = (r: Room, px: number, py: number) => {
+    const isOk = (x: number, y: number) => {
+      const tx = Math.floor(x / TILE);
+      const ty = Math.floor(y / TILE);
+      if (tx < 1 || ty < 1 || tx > ROOM_W - 2 || ty > ROOM_H - 2) return false;
+      const id = r.tiles[ty]![tx]!;
+      if (id === T.CHASM || id === T.SPIKE || id === T.DOOR || id === T.PORTAL) return false;
+      return !(TILE_PROPS[id]?.solid ?? true);
+    };
+    if (isOk(px, py)) return { x: px, y: py };
+    const tx = Math.floor(px / TILE);
+    const ty = Math.floor(py / TILE);
+    for (let ring = 1; ring < Math.max(ROOM_W, ROOM_H); ring++) {
+      for (let oy = -ring; oy <= ring; oy++) {
+        for (let ox = -ring; ox <= ring; ox++) {
+          if (Math.max(Math.abs(ox), Math.abs(oy)) !== ring) continue;
+          const cx = (tx + ox) * TILE + TILE / 2;
+          const cy = (ty + oy) * TILE + TILE / 2;
+          if (isOk(cx, cy)) return { x: cx, y: cy };
+        }
+      }
+    }
+    return { x: W / 2, y: H / 2 };
+  };
 
   /** Pilares destrutiveis absorvem dano ate serem destruidos. */
   const hitPillar = (r: Room, px: number, py: number, dmg: number) => {
