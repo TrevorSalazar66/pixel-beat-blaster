@@ -203,8 +203,10 @@ export function NeonDungeon() {
       } else {
         setVarInventory((inv) => {
           const cur = inv[track] ?? [0, 0];
-          const next: [number, number] = [cur[0], cur[1]];
-          next[variant - 1] = Math.max(0, next[variant - 1] + d);
+          const a = cur[0] ?? 0;
+          const bq = cur[1] ?? 0;
+          const next: [number, number] =
+            variant === 1 ? [Math.max(0, a + d), bq] : [a, Math.max(0, bq + d)];
           return { ...inv, [track]: next };
         });
       }
@@ -460,6 +462,9 @@ export function NeonDungeon() {
   const restart = useCallback(() => {
     setInventory(emptyInv());
     setRareInventory(emptyInv());
+    setVarInventory(emptyVarInv());
+    setForgeOpen(false);
+    setForgeMsg(null);
     setPattern(createPattern());
     setCoins(0);
     setKills(0);
@@ -502,9 +507,10 @@ export function NeonDungeon() {
   /* ---- shop purchase ---- */
   const buy = useCallback((p: Pedestal) => {
     const def = SHOP_ITEMS.find((i) => i.id === p.item)!;
-    if (p.sold || coinsRef.current < def.cost) return;
+    const cost = itemCost(def, floorRef.current.level);
+    if (p.sold || coinsRef.current < cost) return;
     p.sold = true;
-    setCoins((c) => c - def.cost);
+    setCoins((c) => c - cost);
     if (def.id === "heal") setHp((h) => Math.min(h + 1, 99));
     if (def.id === "maxhp") {
       setMaxHp((m) => m + 1);
@@ -727,12 +733,16 @@ export function NeonDungeon() {
           spawned < SPAWNER_BUDGET &&
           r.enemies.length < MAX_ENEMIES_PER_ROOM
         ) {
-          const id = COMMON_ENEMY_IDS[Math.floor(Math.random() * COMMON_ENEMY_IDS.length)]!;
-          const def = getDef(id);
+          const def = getDef(rollEnemyId(floorRef.current.level));
           const lvl = floorRef.current.level;
           const hp = scaledHp(def.hpBase, lvl);
           const ang = Math.random() * Math.PI * 2;
-          const size = def.id === "bass_dropper" ? 36 : 26;
+          const size =
+            def.id === "bass_dropper" || def.id === "bass_dropper_quake"
+              ? 36
+              : def.variant
+                ? 30
+                : 26;
           const spot = safeDropSpot(r, e.x + Math.cos(ang) * 46, e.y + Math.sin(ang) * 46);
           budget -= 1;
           e.spawned = spawned + 1;
