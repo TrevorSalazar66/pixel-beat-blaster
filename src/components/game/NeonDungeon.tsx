@@ -1096,6 +1096,9 @@ export function NeonDungeon() {
         ).length;
         const auraMul = 1 + Math.min(0.6, sirens * 0.3);
 
+        /** inimigos gerados neste frame (divisao do boss redondo) */
+        const born: Enemy[] = [];
+
         for (const e of cur.enemies) {
           if (e.spawnT > 0) {
             e.spawnT -= dt;
@@ -1121,7 +1124,9 @@ export function NeonDungeon() {
             e.behavior === "SIREN_SPEED_AURA" ||
             e.behavior === "DASH_CHARGE" ||
             e.behavior === "SIREN_HEALER" ||
-            e.behavior === "BASS_QUAKE_DOUBLE"
+            e.behavior === "BASS_QUAKE_DOUBLE" ||
+            e.behavior === "BOSS_TRI_SPIRAL" ||
+            e.behavior === "PENTAGON_AMBUSH"
           ) {
             const nx = e.x + (ex / dist) * e.speed * spd * dt;
             const ny = e.y + (ey / dist) * e.speed * spd * dt;
@@ -1129,6 +1134,155 @@ export function NeonDungeon() {
             if (!enemyBlocked(cur, e.x, ny, flying, e.size)) e.y = ny;
           }
           clampToRoom(e);
+
+          /* ---------- boss redondo: ricochete acelerando + divisao ---------- */
+          if (e.behavior === "BOSS_BOUNCE_SPLIT") {
+            e.bspeed = Math.min(620, (e.bspeed ?? 150) + dt * 26);
+            const vx = e.dvx ?? 1;
+            const vy = e.dvy ?? 0;
+            const nx = e.x + vx * e.bspeed * dt;
+            const ny = e.y + vy * e.bspeed * dt;
+            if (!enemyBlocked(cur, nx, e.y, true, e.size)) e.x = nx;
+            else e.dvx = -vx;
+            if (!enemyBlocked(cur, e.x, ny, true, e.size)) e.y = ny;
+            else e.dvy = -vy;
+            clampToRoom(e);
+
+            /* rastro de tiros no ricochete */
+            e.cooldown = Math.max(-1, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = 1.1;
+              for (let i = 0; i < 6; i++)
+                shots.current.push({
+                  x: e.x,
+                  y: e.y,
+                  vx: Math.cos((i / 6) * Math.PI * 2) * 180,
+                  vy: Math.sin((i / 6) * Math.PI * 2) * 180,
+                  life: 2.4,
+                  color: e.color,
+                  r: 5,
+                  dmg: e.damage,
+                  hostile: true,
+                  pierce: false,
+                  shape: "circle",
+                });
+            }
+
+            /* metade da vida: 2 corpos; um quarto: 4 corpos */
+            if (e.hp > 0 && e.hp <= e.maxHp / 2 && (e.splits ?? 0) < 2) {
+              const gen = (e.splits ?? 0) + 1;
+              e.maxHp = Math.max(8, Math.round(e.maxHp / 4));
+              e.hp = Math.max(4, Math.round(e.hp / 2));
+              e.size = Math.max(22, Math.round(e.size * 0.68));
+              e.splits = gen;
+              const a2 = Math.atan2(e.dvy ?? 0, e.dvx ?? 1) + Math.PI / 2;
+              e.dvx = Math.cos(a2);
+              e.dvy = Math.sin(a2);
+              born.push({
+                ...e,
+                uid: `b${Math.random().toString(36).slice(2, 9)}`,
+                dvx: Math.cos(a2 + Math.PI),
+                dvy: Math.sin(a2 + Math.PI),
+                bspeed: (e.bspeed ?? 150) * 1.15,
+                hitFlash: 0.2,
+                cooldown: 0.6,
+              });
+            }
+          }
+
+          /* ---------- boss triangular: espiral continua pelas 3 pontas ---------- */
+          if (e.behavior === "BOSS_TRI_SPIRAL") {
+            const frac = e.hp / Math.max(1, e.maxHp);
+            const spin = 1.5 + (1 - frac) * 2.2;
+            e.ang = (e.ang ?? 0) + spin * dt;
+            e.cooldown = Math.max(-0.3, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = frac < 0.4 ? 0.09 : 0.14;
+              for (let i = 0; i < 3; i++) {
+                const ang = (e.ang ?? 0) + (i / 3) * Math.PI * 2;
+                shots.current.push({
+                  x: e.x + Math.cos(ang) * e.size * 0.6,
+                  y: e.y + Math.sin(ang) * e.size * 0.6,
+                  vx: Math.cos(ang) * 250,
+                  vy: Math.sin(ang) * 250,
+                  life: 3,
+                  color: e.color,
+                  r: 4.5,
+                  dmg: e.damage,
+                  hostile: true,
+                  pierce: false,
+                  shape: "triangle",
+                });
+              }
+            }
+          }
+
+          /* ---------- pentagono emboscador ---------- */
+          if (e.behavior === "PENTAGON_AMBUSH") {
+            e.ang = (e.ang ?? 0) + dt * 1.2;
+            e.cooldown = Math.max(-0.4, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = 1.3;
+              e.steps = (e.steps ?? 0) + 1;
+              const pat = e.steps % 3;
+              const base = Math.atan2(ey, ex);
+              if (pat === 0) {
+                /* lasers snipers rapidos */
+                e.lock = { x: player.current.x, y: player.current.y };
+                for (const off of [-0.09, 0.09])
+                  shots.current.push({
+                    x: e.x,
+                    y: e.y,
+                    vx: Math.cos(base + off) * 820,
+                    vy: Math.sin(base + off) * 820,
+                    life: 1.4,
+                    color: "#ff2e5b",
+                    r: 3.5,
+                    dmg: e.damage,
+                    hostile: true,
+                    pierce: false,
+                  });
+              } else if (pat === 1) {
+                /* bombas flutuantes que explodem em area media */
+                e.lock = null;
+                for (const off of [-0.4, 0.4])
+                  shots.current.push({
+                    x: e.x,
+                    y: e.y,
+                    vx: Math.cos(base + off) * 90,
+                    vy: Math.sin(base + off) * 90,
+                    life: 1.8,
+                    color: "#c8ff3d",
+                    r: 9,
+                    dmg: e.damage,
+                    hostile: true,
+                    pierce: false,
+                    explode: true,
+                    fuse: true,
+                    boomR: 320,
+                    shape: "circle",
+                  });
+              } else {
+                /* triangulos lentos teleguiados */
+                e.lock = null;
+                for (const off of [-0.7, 0, 0.7])
+                  shots.current.push({
+                    x: e.x,
+                    y: e.y,
+                    vx: Math.cos(base + off) * 130,
+                    vy: Math.sin(base + off) * 130,
+                    life: 4,
+                    color: "#9dff2e",
+                    r: 6,
+                    dmg: e.damage,
+                    hostile: true,
+                    pierce: false,
+                    homing: 3,
+                    shape: "triangle",
+                  });
+              }
+            }
+          }
 
           /* ---------- variantes elite ---------- */
           if (e.behavior === "DASH_CHARGE") {
