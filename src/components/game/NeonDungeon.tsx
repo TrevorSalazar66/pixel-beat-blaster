@@ -724,21 +724,33 @@ export function NeonDungeon() {
 
     /* synth / bass: area e modificadores */
     if (variant === 1) {
-      // Beam Synth: feixe continuo durante o step
-      beams.current.push({
-        x: cx,
-        y: cy,
-        a,
-        t: 0,
-        life: Math.max(0.12, stepDur),
-        dmg: 4 * dMul,
-        tick: 0,
-      });
+      // Beam Synth: dois feixes opostos que varrem a sala durante o step
+      for (const off of [0, Math.PI])
+        beams.current.push({
+          x: cx,
+          y: cy,
+          a: a + off,
+          t: 0,
+          life: Math.max(0.14, stepDur * 1.4),
+          dmg: 4 * dMul,
+          tick: 0,
+        });
       return;
     }
     if (variant === 2) {
-      // Vamp Bass: janela de cura ao derrotar inimigos sob o som
+      // Vamp Bass: janela de cura + estrelas de sucção lentas
       vamp.current = 2;
+      for (const off of [-1, 1])
+        shoot({
+          vx: Math.cos(a + off * 0.9) * 180,
+          vy: Math.sin(a + off * 0.9) * 180,
+          r: 5 * sMul,
+          dmg: 2 * dMul,
+          life: 2.4,
+          homing: 4,
+          shape: "star",
+          color: "#3dff9e",
+        });
       pools.current.push({
         x: cx,
         y: cy,
