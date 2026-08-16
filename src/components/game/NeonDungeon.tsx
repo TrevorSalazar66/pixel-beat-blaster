@@ -716,7 +716,8 @@ export function NeonDungeon() {
         const when = next;
         patternRef.current.forEach((row, t) => {
           const track = TRACKS[t];
-          if (row[s] && track) playTrack(track.id, when);
+          const cellA = row[s];
+          if (cellA && track) playTrack(track.id, when, cellA.variant);
         });
         timers.push(
           window.setTimeout(
