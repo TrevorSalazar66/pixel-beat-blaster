@@ -100,6 +100,7 @@ export function NeonDungeon() {
   const fireCd = useRef(0);
   const bpmRef = useRef(bpm);
   bpmRef.current = bpm + bpmMod;
+  const maxHpRef = useRef(START_HP);
   const bpmModRef = useRef(0);
   bpmModRef.current = bpmMod;
 
@@ -122,6 +123,7 @@ export function NeonDungeon() {
   const roomIdRef = useRef(roomId);
   roomIdRef.current = roomId;
   const coinsRef = useRef(coins);
+  maxHpRef.current = maxHp;
   coinsRef.current = coins;
   const deadRef = useRef(dead);
   deadRef.current = dead;
