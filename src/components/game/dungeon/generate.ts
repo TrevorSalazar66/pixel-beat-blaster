@@ -4,6 +4,7 @@ import {
   MAX_ENEMIES_PER_ROOM,
   enemyCount,
   getDef,
+  rollEnemyId,
   scaledDamage,
   scaledHp,
   type Enemy,
@@ -11,7 +12,7 @@ import {
 import { TILE } from "./tiles";
 
 export type Dir = "NORTH" | "SOUTH" | "EAST" | "WEST";
-export type RoomType = "SPAWN" | "NORMAL" | "SHOP" | "REWARD" | "BOSS";
+export type RoomType = "SPAWN" | "NORMAL" | "SHOP" | "REWARD" | "BOSS" | "FORGE";
 export type RoomState = "UNVISITED" | "COMBAT" | "CLEARED";
 export type RoomLayout = "STANDARD" | "L_SHAPE" | "T_SHAPE" | "ISLAND" | "PILLARS";
 
@@ -74,7 +75,7 @@ function protectedCell(x: number, y: number) {
 const LAYOUT_POOL: RoomLayout[] = ["STANDARD", "L_SHAPE", "T_SHAPE", "ISLAND", "PILLARS"];
 
 export const pickLayout = (type: RoomType): RoomLayout => {
-  if (type === "SHOP" || type === "SPAWN") return "STANDARD";
+  if (type === "SHOP" || type === "SPAWN" || type === "FORGE") return "STANDARD";
   if (type === "BOSS") return Math.random() < 0.5 ? "PILLARS" : "STANDARD";
   return LAYOUT_POOL[Math.floor(Math.random() * LAYOUT_POOL.length)]!;
 };
@@ -118,7 +119,7 @@ function applyLayout(room: Room) {
 
 /** Perigos ambientais e pisos ritmicos. */
 function decorate(tiles: number[][], type: RoomType) {
-  if (type === "SHOP" || type === "SPAWN") return;
+  if (type === "SHOP" || type === "SPAWN" || type === "FORGE") return;
   const density = type === "BOSS" ? 0.05 : 0.11;
   for (let y = 1; y < ROOM_H - 1; y++) {
     for (let x = 1; x < ROOM_W - 1; x++) {
@@ -133,7 +134,7 @@ function decorate(tiles: number[][], type: RoomType) {
 
 /** Plataformas de BPM e piso amplificador, em manchas 2x2. */
 function paintRhythmFloors(tiles: number[][], type: RoomType) {
-  if (type === "SHOP" || type === "SPAWN") return;
+  if (type === "SHOP" || type === "SPAWN" || type === "FORGE") return;
   const patches: number[] = [];
   if (Math.random() < 0.5) patches.push(T.BPM_UP);
   if (Math.random() < 0.4) patches.push(T.BPM_DOWN);
@@ -227,6 +228,9 @@ export function generateFloor(level: number): Floor {
   );
   if (deadEnds[0]) deadEnds[0].type = "SHOP";
   if (deadEnds[1]) deadEnds[1].type = "REWARD";
+  /* Sala de Forja: semi-rara (nem todo andar tem) */
+  if (deadEnds[2] && Math.random() < 0.55) deadEnds[2].type = "FORGE";
+  else if (deadEnds[1] && Math.random() < 0.2) deadEnds[1].type = "FORGE";
 
   for (const r of Object.values(rooms)) {
     r.layout = pickLayout(r.type);
@@ -234,7 +238,8 @@ export function generateFloor(level: number): Floor {
     decorate(r.tiles, r.type);
     paintRhythmFloors(r.tiles, r.type);
     carveDoors(r);
-    if (r.type !== "SPAWN" && r.type !== "SHOP") r.enemies = spawnEnemies(r, level);
+    if (r.type !== "SPAWN" && r.type !== "SHOP" && r.type !== "FORGE")
+      r.enemies = spawnEnemies(r, level);
   }
 
   return { level, rooms, startId, bossId };
@@ -255,7 +260,15 @@ function makeEnemy(defId: string, x: number, y: number, level: number, boss = fa
     speed: def.speed * 26,
     behavior: def.behavior,
     color: def.color,
-    size: boss ? 64 : def.id === "infected_speaker" ? 42 : def.id === "bass_dropper" ? 36 : 26,
+    size: boss
+      ? 64
+      : def.id === "infected_speaker"
+        ? 42
+        : def.id === "bass_dropper" || def.id === "bass_dropper_quake"
+          ? 36
+          : def.variant
+            ? 30
+            : 26,
     cooldown: def.fireRate ?? 1.6,
     spawnT: 0.5,
     hitFlash: 0,
@@ -265,6 +278,9 @@ function makeEnemy(defId: string, x: number, y: number, level: number, boss = fa
     lock: null,
     vamp: 0,
     spawned: 0,
+    dashT: 0,
+    dvx: 0,
+    dvy: 0,
   };
 }
 
@@ -297,7 +313,7 @@ export function spawnEnemies(room: Room, level: number): Enemy[] {
   for (let i = 0; i < n; i++) {
     if (!spots.length) break;
     const s = spots.splice(Math.floor(Math.random() * spots.length), 1)[0]!;
-    const id = COMMON_ENEMY_IDS[Math.floor(Math.random() * COMMON_ENEMY_IDS.length)]!;
+    const id = rollEnemyId(level);
     out.push(makeEnemy(id, s.x, s.y, level));
   }
   return out;
