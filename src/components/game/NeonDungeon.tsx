@@ -625,12 +625,20 @@ export function NeonDungeon() {
   /* ---- passo do sequenciador: inimigos ritmicos ---- */
   const handleStep = useCallback(() => {
     const r = room();
-    if (frozenRef.current) return;
-    for (const e of r.enemies) {
+    if (frozenRef.current || r.state !== "COMBAT") return;
+    const alive = r.enemies.filter(
+      (e) => e.behavior !== "INFECTED_SPEAKER_SPAWNER" && e.hp > 0,
+    ).length;
+    let budget = Math.max(0, Math.min(MAX_ENEMIES_PER_ROOM, SPAWNER_ACTIVE_LIMIT) - alive);
+    for (const e of [...r.enemies]) {
       if (e.spawnT > 0 || e.stun > 0) continue;
       e.steps += 1;
       if (e.behavior === "LASER_SNIPER_LOCK") {
-        if (e.steps % 4 === 0) {
+        const see = hasLineOfSight(r, e.x, e.y, player.current.x, player.current.y);
+        if (!see) {
+          e.lock = null;
+          e.steps = 0;
+        } else if (e.steps % 4 === 0) {
           const target = e.lock ?? { x: player.current.x, y: player.current.y };
           const dx = target.x - e.x;
           const dy = target.y - e.y;
@@ -646,25 +654,34 @@ export function NeonDungeon() {
           e.lock = { x: player.current.x, y: player.current.y };
         }
       }
-      if (e.behavior === "INFECTED_SPEAKER_SPAWNER" && e.steps % 4 === 0) {
-        if (r.enemies.length < 16) {
+      if (e.behavior === "INFECTED_SPEAKER_SPAWNER" && e.steps % 8 === 0) {
+        const spawned = e.spawned ?? 0;
+        if (
+          budget > 0 &&
+          spawned < SPAWNER_BUDGET &&
+          r.enemies.length < MAX_ENEMIES_PER_ROOM
+        ) {
           const id = COMMON_ENEMY_IDS[Math.floor(Math.random() * COMMON_ENEMY_IDS.length)]!;
           const def = getDef(id);
           const lvl = floorRef.current.level;
           const hp = scaledHp(def.hpBase, lvl);
           const ang = Math.random() * Math.PI * 2;
+          const size = def.id === "bass_dropper" ? 36 : 26;
+          const spot = safeDropSpot(r, e.x + Math.cos(ang) * 46, e.y + Math.sin(ang) * 46);
+          budget -= 1;
+          e.spawned = spawned + 1;
           r.enemies.push({
             uid: `s${Math.random().toString(36).slice(2, 9)}`,
             defId: def.id,
-            x: e.x + Math.cos(ang) * 46,
-            y: e.y + Math.sin(ang) * 46,
+            x: spot.x,
+            y: spot.y,
             hp,
             maxHp: hp,
             damage: scaledDamage(def.damageBase, lvl),
             speed: def.speed * 26,
             behavior: def.behavior,
             color: def.color,
-            size: def.id === "bass_dropper" ? 36 : 26,
+            size,
             cooldown: def.fireRate ?? 1.6,
             spawnT: 0.5,
             hitFlash: 0,
@@ -673,6 +690,7 @@ export function NeonDungeon() {
             steps: 0,
             lock: null,
             vamp: 0,
+            spawned: 0,
           });
         }
       }
@@ -1040,8 +1058,9 @@ export function NeonDungeon() {
                   const sp = Math.hypot(s.vx, s.vy) || 1;
                   const kx = e.x + (s.vx / sp) * s.knock;
                   const ky = e.y + (s.vy / sp) * s.knock;
-                  if (!solidFor(cur, kx, e.y, true)) e.x = kx;
-                  if (!solidFor(cur, e.x, ky, true)) e.y = ky;
+                  if (!enemyBlocked(cur, kx, e.y, true, e.size)) e.x = kx;
+                  if (!enemyBlocked(cur, e.x, ky, true, e.size)) e.y = ky;
+                  clampToRoom(e);
                 }
                 if (s.explode) {
                   blasts.current.push({
