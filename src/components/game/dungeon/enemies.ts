@@ -213,6 +213,12 @@ export const COMMON_ENEMY_IDS = [
 ];
 
 /** Variantes elite: sorteadas com chance menor conforme o andar. */
+/** Bosses possiveis na sala de boss. */
+export const BOSS_IDS = ["boss_synth_lord", "boss_bouncer", "boss_trigon"];
+
+/** Chance de uma emboscada pentagonal apos limpar a sala. */
+export const AMBUSH_CHANCE = 0.25;
+
 export const VARIANT_ENEMY_IDS = [
   "chaser_neon_elite",
   "turret_pixel_burst",
@@ -275,4 +281,10 @@ export type Enemy = {
   dashT?: number;
   dvx?: number;
   dvy?: number;
+  /** rotacao atual (boss triangular) */
+  ang?: number;
+  /** velocidade do ricochete (boss redondo) */
+  bspeed?: number;
+  /** quantas vezes este corpo ja se dividiu */
+  splits?: number;
 };
