@@ -589,8 +589,11 @@ export function NeonDungeon() {
         const dy = e.y - cy;
         const d = Math.hypot(dx, dy) || 1;
         if (d < 150) {
-          e.x += (dx / d) * 46;
-          e.y += (dy / d) * 46;
+          const kx = e.x + (dx / d) * 46;
+          const ky = e.y + (dy / d) * 46;
+          if (!enemyBlocked(r, kx, e.y, true, e.size)) e.x = kx;
+          if (!enemyBlocked(r, e.x, ky, true, e.size)) e.y = ky;
+          clampToRoom(e);
         }
       }
       return;
