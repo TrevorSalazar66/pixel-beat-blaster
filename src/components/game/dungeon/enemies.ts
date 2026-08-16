@@ -111,6 +111,13 @@ export const getDef = (id: string) => ENEMY_DEFS.find((e) => e.id === id) ?? ENE
 /** Infinite difficulty scaling */
 export const scaledHp = (base: number, floor: number) => Math.round(base * (1 + (floor - 1) * 0.25));
 export const scaledDamage = (base: number, floor: number) => base + Math.floor((floor - 1) / 3);
+/** Limite duro de inimigos vivos por sala. */
+export const MAX_ENEMIES_PER_ROOM = 12;
+/** Limite de inimigos simultaneos que um spawner mantem em campo. */
+export const SPAWNER_ACTIVE_LIMIT = 6;
+/** Total que cada Caixa de Som Infectada pode invocar. */
+export const SPAWNER_BUDGET = 8;
+
 export const enemyCount = (floor: number) => Math.min(3 + floor, 10);
 
 export type Enemy = {
@@ -137,4 +144,6 @@ export type Enemy = {
   lock: { x: number; y: number } | null;
   /** janela de efeito do Vamp Bass */
   vamp: number;
+  /** quantos inimigos esta estrutura ja invocou (limite de spawner) */
+  spawned?: number;
 };

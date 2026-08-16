@@ -1,5 +1,13 @@
 import { DOOR_COLS, DOOR_ROWS, PILLAR_HP, ROOM_H, ROOM_W, T } from "./tiles";
-import { COMMON_ENEMY_IDS, enemyCount, getDef, scaledDamage, scaledHp, type Enemy } from "./enemies";
+import {
+  COMMON_ENEMY_IDS,
+  MAX_ENEMIES_PER_ROOM,
+  enemyCount,
+  getDef,
+  scaledDamage,
+  scaledHp,
+  type Enemy,
+} from "./enemies";
 import { TILE } from "./tiles";
 
 export type Dir = "NORTH" | "SOUTH" | "EAST" | "WEST";
@@ -256,6 +264,7 @@ function makeEnemy(defId: string, x: number, y: number, level: number, boss = fa
     steps: 0,
     lock: null,
     vamp: 0,
+    spawned: 0,
   };
 }
 
@@ -276,7 +285,7 @@ export function spawnEnemies(room: Room, level: number): Enemy[] {
     return [boss];
   }
 
-  const n = Math.min(enemyCount(level), spots.length);
+  const n = Math.min(enemyCount(level), spots.length, MAX_ENEMIES_PER_ROOM - 1);
   const out: Enemy[] = [];
 
   /* Caixa de Som Infectada: estrutura que invoca inimigos ate ser destruida */
