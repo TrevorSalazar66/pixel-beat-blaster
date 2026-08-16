@@ -1576,6 +1576,7 @@ export function NeonDungeon() {
             currentStep={currentStep}
             onPlace={placeBlock}
             onRemove={removeBlock}
+            onCycleVariant={cycleVariant}
             onClose={() => setEditorOpen(false)}
           />
         )}
