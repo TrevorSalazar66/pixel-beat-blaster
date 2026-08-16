@@ -3,10 +3,16 @@ export type Behavior =
   | "SHOOT_AT_PLAYER_PERIODIC"
   | "FLY_IGNORES_CHASMS"
   | "BOSS_PATTERN_WAVES_AND_PROJECTILES"
+  | "BOSS_BOUNCING_DIVIDER"
+  | "BOSS_TRIANGLE_SPIRAL"
   | "SIREN_SPEED_AURA"
   | "BASS_DROP_SHOCKWAVE"
   | "LASER_SNIPER_LOCK"
-  | "INFECTED_SPEAKER_SPAWNER";
+  | "INFECTED_SPEAKER_SPAWNER"
+  | "PENTAGON_SPECIAL_ASSAULT"
+  | "VARIANT_CHASER_BURST"
+  | "VARIANT_TURRET_SPREAD"
+  | "VARIANT_FLOATER_HOMING";
 
 export type EnemyDef = {
   id: string;
@@ -30,14 +36,33 @@ export const ENEMY_DEFS: EnemyDef[] = [
     color: "#ff0055",
   },
   {
+    id: "variant_chaser",
+    name: "Perseguidor Frenético",
+    hpBase: 18,
+    damageBase: 1,
+    speed: 2.7,
+    behavior: "VARIANT_CHASER_BURST",
+    color: "#ff5500",
+  },
+  {
     id: "turret_pixel",
     name: "Torre Atiradora",
     hpBase: 20,
     damageBase: 1,
     speed: 0,
     behavior: "SHOOT_AT_PLAYER_PERIODIC",
-    fireRate: 2.0,
+    fireRate: 2.2,
     color: "#00ffcc",
+  },
+  {
+    id: "variant_turret",
+    name: "Torre Multidirecional",
+    hpBase: 26,
+    damageBase: 1,
+    speed: 0,
+    behavior: "VARIANT_TURRET_SPREAD",
+    fireRate: 2.5,
+    color: "#00ccff",
   },
   {
     id: "floater_glitch",
@@ -49,13 +74,42 @@ export const ENEMY_DEFS: EnemyDef[] = [
     color: "#ffff00",
   },
   {
+    id: "variant_floater",
+    name: "Glitch Teleguiado",
+    hpBase: 14,
+    damageBase: 1,
+    speed: 1.6,
+    behavior: "VARIANT_FLOATER_HOMING",
+    fireRate: 3.0,
+    color: "#e6ff00",
+  },
+  {
     id: "boss_synth_lord",
     name: "O Maestro Subwoofer",
-    hpBase: 150,
+    hpBase: 180,
     damageBase: 2,
-    speed: 1.0,
+    speed: 1.2,
     behavior: "BOSS_PATTERN_WAVES_AND_PROJECTILES",
     color: "#aa00ff",
+  },
+  {
+    id: "boss_bouncing_orb",
+    name: "Bouncing Core / Núcleo Divisor",
+    hpBase: 160,
+    damageBase: 2,
+    speed: 2.8,
+    behavior: "BOSS_BOUNCING_DIVIDER",
+    color: "#ff0077",
+  },
+  {
+    id: "boss_triangle_spiral",
+    name: "Trigon / Espiral Vórtice",
+    hpBase: 170,
+    damageBase: 2,
+    speed: 0.9,
+    behavior: "BOSS_TRIANGLE_SPIRAL",
+    fireRate: 0.25,
+    color: "#00ffea",
   },
   {
     id: "siren_support",
@@ -94,13 +148,26 @@ export const ENEMY_DEFS: EnemyDef[] = [
     behavior: "INFECTED_SPEAKER_SPAWNER",
     color: "#3dff9e",
   },
+  {
+    id: "pentagon_overlord",
+    name: "Pentágono Dimensional",
+    hpBase: 45,
+    damageBase: 2,
+    speed: 1.1,
+    behavior: "PENTAGON_SPECIAL_ASSAULT",
+    fireRate: 1.8,
+    color: "#ff00ea",
+  },
 ];
 
-/** Inimigos que aparecem no sorteio normal das salas. */
+/** Inimigos que aparecem no sorteio normal das salas (incluindo variantes). */
 export const COMMON_ENEMY_IDS = [
   "chaser_neon",
+  "variant_chaser",
   "turret_pixel",
+  "variant_turret",
   "floater_glitch",
+  "variant_floater",
   "siren_support",
   "bass_dropper",
   "laser_sniper",
@@ -137,4 +204,10 @@ export type Enemy = {
   lock: { x: number; y: number } | null;
   /** janela de efeito do Vamp Bass */
   vamp: number;
+  /** Velocidade vetorial extra para bosses saltitantes ou projéteis */
+  vx?: number;
+  vy?: number;
+  splitStage?: number;
+  angle?: number;
 };
+

@@ -14,7 +14,7 @@ export const BLOCK_POOL: BlockDrop[] = [
     label: "Kick",
     color: "#ff0055",
     chance: 0.35,
-    effect: "Projétil pesado na direção da mira",
+    effect: "Projétil pesado na direção da mira (5% knockback)",
   },
   {
     id: "snare",
@@ -35,7 +35,7 @@ export const BLOCK_POOL: BlockDrop[] = [
     label: "Synth",
     color: "#b14dff",
     chance: 0.15,
-    effect: "Área circular de dano contínuo",
+    effect: "Área circular de som (30% chance de empurrar)",
   },
 ];
 
@@ -48,3 +48,4 @@ export function rollBlock(rand: () => number = Math.random): TrackId {
   }
   return "kick";
 }
+

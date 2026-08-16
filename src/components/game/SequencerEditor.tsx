@@ -10,7 +10,7 @@ type Props = {
   rareInventory: Record<TrackId, number>;
   bpm: number;
   currentStep: number;
-  onPlace: (trackIndex: number, step: number, block: { track: TrackId; rare: boolean }) => void;
+  onPlace: (trackIndex: number, step: number, block: { track: TrackId; rare: boolean; variant: import("./tracks").Variant }) => void;
   onRemove: (trackIndex: number, step: number) => void;
   onClose: () => void;
 };
@@ -33,13 +33,15 @@ export function SequencerEditor({
     const cell = pattern[t]?.[s] ?? null;
     if (sel) {
       if (sel.track !== trackId) return;
-      onPlace(t, s, sel);
+      onPlace(t, s, { track: sel.track, rare: sel.rare, variant: 0 });
       const left = sel.rare ? rareInventory[sel.track] ?? 0 : inventory[sel.track] ?? 0;
       if (left - 1 <= 0) setSel(null);
     } else if (cell) {
       onRemove(t, s);
     }
   };
+
+
 
   return (
     <div className="absolute inset-0 z-40 flex flex-col gap-4 overflow-auto bg-background/97 p-5 backdrop-blur-sm">
@@ -78,15 +80,19 @@ export function SequencerEditor({
                     type="button"
                     aria-label={`${track.short} passo ${s + 1}`}
                     onClick={() => clickSlot(t, s)}
-                    className="h-8 rounded-xs border transition-all"
+                    className="relative h-8 rounded-xs border flex items-center justify-center font-pixel text-[6px] transition-all"
                     style={{
                       borderColor:
                         currentStep === s ? "#ffffff" : isTarget ? track.color : `${track.color}55`,
                       background: cell ? (cell.rare ? "#ffffff" : track.color) : "transparent",
+                      color: cell ? (cell.rare ? "#000000" : "#ffffff") : "transparent",
                       boxShadow: cell ? `0 0 12px ${track.color}` : "none",
                       opacity: cell ? 1 : isTarget ? 0.6 : 0.3,
                     }}
-                  />
+                  >
+                    {cell && (cell.variant === 1 ? "A" : cell.variant === 2 ? "B" : "")}
+                  </button>
+
                 );
               })}
             </div>

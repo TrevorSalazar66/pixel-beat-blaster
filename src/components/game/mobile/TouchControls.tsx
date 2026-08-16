@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { MovementGestureLine, Orientation, TouchInput } from "./types";
+import type { Orientation, TouchInput } from "./types";
 
 type Stick = { id: number; ox: number; oy: number; x: number; y: number };
 
@@ -12,16 +12,18 @@ type Props = {
 const MAX_R = 52;
 
 /**
- * Retrato: gesto de linha reta (metade superior) move; analógico flutuante (metade inferior) atira.
- * Paisagem: dual-stick — esquerdo move, direito atira.
+ * Controles de toque:
+ * - Retrato (Vertical):
+ *    - Metade superior (y < 50%): Analógico virtual invisível e livre para movimento do personagem.
+ *    - Metade inferior (y >= 50%): Analógico virtual flutuante para mira e disparo contínuo.
+ * - Paisagem (Horizontal):
+ *    - Metade esquerda (x < 50%): Analógico virtual para movimento 360°.
+ *    - Metade direita (x >= 50%): Analógico virtual para mira e disparo manual/override.
  */
 export function TouchControls({ orientation, input, enabled }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [moveStick, setMoveStick] = useState<Stick | null>(null);
   const [fireStick, setFireStick] = useState<Stick | null>(null);
-  const [line, setLine] = useState<MovementGestureLine | null>(null);
-  const gesture = useRef<{ id: number; x: number; y: number } | null>(null);
-  const fadeTimer = useRef<number | null>(null);
 
   const portrait = orientation === "PORTRAIT";
 
@@ -31,7 +33,6 @@ export function TouchControls({ orientation, input, enabled }: Props) {
       input.current.aimActive = false;
       setMoveStick(null);
       setFireStick(null);
-      setLine(null);
     }
   }, [enabled, input, orientation]);
 
@@ -47,23 +48,25 @@ export function TouchControls({ orientation, input, enabled }: Props) {
     rootRef.current?.setPointerCapture(e.pointerId);
     if (portrait) {
       if (p.y < p.h * 0.5) {
-        gesture.current = { id: e.pointerId, x: p.x, y: p.y };
-        setLine({ startX: p.x, startY: p.y, endX: p.x, endY: p.y, opacity: 0.6, active: true });
+        // Metade superior: Analógico invisível livre para movimento
+        const s = { id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y };
+        setMoveStick(s);
+        input.current.move = vec(s);
       } else {
+        // Metade inferior: Analógico de mira / tiro
         setFireStick({ id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y });
       }
     } else {
-      if (p.x < p.w * 0.5) setMoveStick({ id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y });
-      else setFireStick({ id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y });
+      if (p.x < p.w * 0.5) {
+        setMoveStick({ id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y });
+      } else {
+        setFireStick({ id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y });
+      }
     }
   };
 
   const onMove = (e: React.PointerEvent) => {
     const p = local(e);
-    if (gesture.current?.id === e.pointerId) {
-      setLine((l) => (l ? { ...l, endX: p.x, endY: p.y } : l));
-      return;
-    }
     if (moveStick?.id === e.pointerId) {
       const s = { ...moveStick, x: p.x, y: p.y };
       setMoveStick(s);
@@ -82,19 +85,6 @@ export function TouchControls({ orientation, input, enabled }: Props) {
   };
 
   const onUp = (e: React.PointerEvent) => {
-    if (gesture.current?.id === e.pointerId) {
-      const g = gesture.current;
-      const p = local(e);
-      const dx = p.x - g.x;
-      const dy = p.y - g.y;
-      const len = Math.hypot(dx, dy);
-      input.current.move = len > 14 ? { x: dx / len, y: dy / len } : { x: 0, y: 0 };
-      gesture.current = null;
-      setLine((l) => (l ? { ...l, endX: p.x, endY: p.y, opacity: 0, active: false } : l));
-      if (fadeTimer.current) window.clearTimeout(fadeTimer.current);
-      fadeTimer.current = window.setTimeout(() => setLine(null), 300);
-      return;
-    }
     if (moveStick?.id === e.pointerId) {
       setMoveStick(null);
       input.current.move = { x: 0, y: 0 };
@@ -115,22 +105,8 @@ export function TouchControls({ orientation, input, enabled }: Props) {
       onPointerUp={onUp}
       onPointerCancel={onUp}
     >
-      {line && (
-        <svg className="pointer-events-none absolute inset-0 h-full w-full">
-          <line
-            x1={line.startX}
-            y1={line.startY}
-            x2={line.endX}
-            y2={line.endY}
-            stroke="rgba(0, 229, 255, 0.6)"
-            strokeWidth={5}
-            strokeLinecap="round"
-            style={{ opacity: line.opacity, transition: "opacity 300ms linear" }}
-          />
-        </svg>
-      )}
-
-      {moveStick && <StickView s={moveStick} color="0, 229, 255" />}
+      {/* No modo retrato o analogico de movimento e invisivel conforme solicitado; no modo paisagem e visivel */}
+      {moveStick && !portrait && <StickView s={moveStick} color="0, 229, 255" />}
       {fireStick && <StickView s={fireStick} color="255, 0, 100" />}
     </div>
   );
@@ -171,7 +147,7 @@ function vec(s: Stick) {
   const dx = s.x - s.ox;
   const dy = s.y - s.oy;
   const len = Math.hypot(dx, dy);
-  if (len < 8) return { x: 0, y: 0 };
+  if (len < 6) return { x: 0, y: 0 };
   const c = Math.min(1, len / MAX_R);
   return { x: (dx / len) * c, y: (dy / len) * c };
 }
@@ -180,3 +156,4 @@ function norm(v: { x: number; y: number }) {
   const l = Math.hypot(v.x, v.y) || 1;
   return { x: v.x / l, y: v.y / l };
 }
+

@@ -12,7 +12,17 @@ export function Minimap({ floor, currentId }: { floor: Floor; currentId: string 
         const room = floor.rooms[`${x},${y}`];
         const active = room?.id === currentId;
         const visited = room && room.state !== "UNVISITED";
-        const icon = room?.type === "SHOP" ? "$" : room?.type === "BOSS" ? "☠" : "";
+
+        if (!room || !visited) {
+          return (
+            <div
+              key={`${x},${y}`}
+              className="h-4 w-4 rounded-[2px] border border-transparent bg-transparent"
+            />
+          );
+        }
+
+        const icon = room.type === "SHOP" ? "$" : room.type === "FORGE" ? "🔨" : room.type === "BOSS" ? "☠" : "";
         return (
           <div
             key={`${x},${y}`}
@@ -20,8 +30,8 @@ export function Minimap({ floor, currentId }: { floor: Floor; currentId: string 
               active ? "animate-pulse" : ""
             }`}
             style={{
-              borderColor: room ? (active ? "#2ec8ff" : "#ffffff22") : "transparent",
-              background: room ? (active ? "#2ec8ff33" : visited ? "#8b93a833" : "#ffffff0d") : "transparent",
+              borderColor: active ? "#2ec8ff" : "#ffffff33",
+              background: active ? "#2ec8ff44" : "#8b93a822",
               color: active ? "#2ec8ff" : "#8b93a8",
               boxShadow: active ? "0 0 10px #2ec8ff" : "none",
             }}
@@ -33,3 +43,4 @@ export function Minimap({ floor, currentId }: { floor: Floor; currentId: string 
     </div>
   );
 }
+

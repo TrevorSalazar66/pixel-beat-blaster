@@ -32,19 +32,13 @@ export function MobileHUD({
 }: Props) {
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
-      <Draggable id="minimap" editing={editing} layout={layout}>
-        <div className="rounded-md border border-neon-cyan/60 bg-background/40 p-1 opacity-80">
-          <Minimap floor={floor} currentId={roomId} />
-        </div>
-      </Draggable>
-
       <Draggable id="stats" editing={editing} layout={layout}>
-        <div className="flex flex-col gap-1 rounded-md border border-neon-magenta/40 bg-background/50 px-2 py-1.5">
+        <div className="flex items-center gap-2 rounded-md border border-neon-magenta/40 bg-background/70 px-2.5 py-1.5 shadow-md backdrop-blur-sm">
           <div className="flex gap-1">
             {Array.from({ length: maxHp }).map((_, i) => (
               <div
                 key={i}
-                className="h-3 w-3 rounded-[2px]"
+                className="h-3.5 w-3.5 rounded-[2px]"
                 style={{
                   background: i < hp ? "#ff2e5b" : "transparent",
                   border: "1px solid #ff2e5b66",
@@ -53,8 +47,15 @@ export function MobileHUD({
               />
             ))}
           </div>
+          <div className="h-3 w-[1px] bg-muted-foreground/30" />
           <div className="font-pixel text-[8px] text-neon-yellow">♪ {coins}</div>
           <div className="font-pixel text-[8px] uppercase text-neon-cyan">B{floor.level}</div>
+        </div>
+      </Draggable>
+
+      <Draggable id="minimap" editing={editing} layout={layout}>
+        <div className="rounded-md border border-neon-cyan/60 bg-background/70 p-1 opacity-90 shadow-md backdrop-blur-sm">
+          <Minimap floor={floor} currentId={roomId} />
         </div>
       </Draggable>
 
@@ -86,8 +87,8 @@ function ActionButton({
     <button
       type="button"
       onClick={editing ? undefined : onClick}
-      className="rounded-full border-2 bg-background/60 px-3 py-2 font-pixel text-[9px] uppercase"
-      style={{ borderColor: color, color, boxShadow: `0 0 14px ${color}66` }}
+      className="rounded-full border-2 bg-background/80 px-3 py-1.5 font-pixel text-[9px] uppercase shadow-md backdrop-blur-sm transition-transform active:scale-95"
+      style={{ borderColor: color, color, boxShadow: `0 0 12px ${color}66` }}
     >
       {label}
     </button>
@@ -138,7 +139,7 @@ function Draggable({
     <div
       ref={ref}
       onPointerDown={onPointerDown}
-      className={`pointer-events-auto absolute touch-none ${
+      className={`pointer-events-auto absolute touch-none select-none ${
         editing ? "cursor-move rounded-md outline-dashed outline-2 outline-neon-magenta/80" : ""
       }`}
       style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
@@ -147,3 +148,4 @@ function Draggable({
     </div>
   );
 }
+

@@ -3,7 +3,7 @@ import { COMMON_ENEMY_IDS, enemyCount, getDef, scaledDamage, scaledHp, type Enem
 import { TILE } from "./tiles";
 
 export type Dir = "NORTH" | "SOUTH" | "EAST" | "WEST";
-export type RoomType = "SPAWN" | "NORMAL" | "SHOP" | "REWARD" | "BOSS";
+export type RoomType = "SPAWN" | "NORMAL" | "SHOP" | "REWARD" | "BOSS" | "FORGE";
 export type RoomState = "UNVISITED" | "COMBAT" | "CLEARED";
 export type RoomLayout = "STANDARD" | "L_SHAPE" | "T_SHAPE" | "ISLAND" | "PILLARS";
 
@@ -66,7 +66,7 @@ function protectedCell(x: number, y: number) {
 const LAYOUT_POOL: RoomLayout[] = ["STANDARD", "L_SHAPE", "T_SHAPE", "ISLAND", "PILLARS"];
 
 export const pickLayout = (type: RoomType): RoomLayout => {
-  if (type === "SHOP" || type === "SPAWN") return "STANDARD";
+  if (type === "SHOP" || type === "SPAWN" || type === "FORGE") return "STANDARD";
   if (type === "BOSS") return Math.random() < 0.5 ? "PILLARS" : "STANDARD";
   return LAYOUT_POOL[Math.floor(Math.random() * LAYOUT_POOL.length)]!;
 };
@@ -110,7 +110,7 @@ function applyLayout(room: Room) {
 
 /** Perigos ambientais e pisos ritmicos. */
 function decorate(tiles: number[][], type: RoomType) {
-  if (type === "SHOP" || type === "SPAWN") return;
+  if (type === "SHOP" || type === "SPAWN" || type === "FORGE") return;
   const density = type === "BOSS" ? 0.05 : 0.11;
   for (let y = 1; y < ROOM_H - 1; y++) {
     for (let x = 1; x < ROOM_W - 1; x++) {
@@ -125,7 +125,7 @@ function decorate(tiles: number[][], type: RoomType) {
 
 /** Plataformas de BPM e piso amplificador, em manchas 2x2. */
 function paintRhythmFloors(tiles: number[][], type: RoomType) {
-  if (type === "SHOP" || type === "SPAWN") return;
+  if (type === "SHOP" || type === "SPAWN" || type === "FORGE") return;
   const patches: number[] = [];
   if (Math.random() < 0.5) patches.push(T.BPM_UP);
   if (Math.random() < 0.4) patches.push(T.BPM_DOWN);
@@ -152,7 +152,7 @@ function carveDoors(room: Room) {
 }
 
 export function generateFloor(level: number): Floor {
-  const target = 5 + level;
+  const target = 6 + level;
   const cells = new Map<string, { x: number; y: number }>();
   let cx = 2;
   let cy = 2;
@@ -213,12 +213,20 @@ export function generateFloor(level: number): Floor {
   }
   rooms[bossId]!.type = "BOSS";
 
-  // dead-end branches become shop / reward
+  // dead-end branches become shop / reward / forge
   const deadEnds = Object.values(rooms).filter(
     (r) => r.doors.length === 1 && r.id !== startId && r.id !== bossId,
   );
   if (deadEnds[0]) deadEnds[0].type = "SHOP";
   if (deadEnds[1]) deadEnds[1].type = "REWARD";
+  if (deadEnds[2]) deadEnds[2].type = "FORGE";
+  else {
+    // Sala de forja semi-rara
+    const normalRooms = Object.values(rooms).filter((r) => r.type === "NORMAL");
+    if (normalRooms.length > 2 && Math.random() < 0.6) {
+      normalRooms[0]!.type = "FORGE";
+    }
+  }
 
   for (const r of Object.values(rooms)) {
     r.layout = pickLayout(r.type);
@@ -226,16 +234,21 @@ export function generateFloor(level: number): Floor {
     decorate(r.tiles, r.type);
     paintRhythmFloors(r.tiles, r.type);
     carveDoors(r);
-    if (r.type !== "SPAWN" && r.type !== "SHOP") r.enemies = spawnEnemies(r, level);
+    if (r.type !== "SPAWN" && r.type !== "SHOP" && r.type !== "FORGE") {
+      r.enemies = spawnEnemies(r, level);
+    }
   }
 
   return { level, rooms, startId, bossId };
 }
 
 let uid = 0;
-function makeEnemy(defId: string, x: number, y: number, level: number, boss = false): Enemy {
+export function makeEnemy(defId: string, x: number, y: number, level: number, boss = false): Enemy {
   const def = getDef(defId);
   const hp = scaledHp(def.hpBase, level);
+  const isBouncingBoss = def.id === "boss_bouncing_orb";
+  const isTrigonBoss = def.id === "boss_triangle_spiral";
+
   return {
     uid: `e${uid++}`,
     defId: def.id,
@@ -247,7 +260,11 @@ function makeEnemy(defId: string, x: number, y: number, level: number, boss = fa
     speed: def.speed * 26,
     behavior: def.behavior,
     color: def.color,
-    size: boss ? 64 : def.id === "infected_speaker" ? 42 : def.id === "bass_dropper" ? 36 : 26,
+    size: boss
+      ? (isBouncingBoss ? 52 : isTrigonBoss ? 56 : 64)
+      : def.id === "infected_speaker" ? 42
+      : def.id === "bass_dropper" ? 36
+      : def.id === "pentagon_overlord" ? 34 : 26,
     cooldown: def.fireRate ?? 1.6,
     spawnT: 0.5,
     hitFlash: 0,
@@ -256,6 +273,10 @@ function makeEnemy(defId: string, x: number, y: number, level: number, boss = fa
     steps: 0,
     lock: null,
     vamp: 0,
+    vx: isBouncingBoss ? 160 : 0,
+    vy: isBouncingBoss ? 130 : 0,
+    splitStage: 1,
+    angle: 0,
   };
 }
 
@@ -266,15 +287,20 @@ export function spawnEnemies(room: Room, level: number): Enemy[] {
       if (room.tiles[y]![x] === T.FLOOR) spots.push({ x: x * TILE + TILE / 2, y: y * TILE + TILE / 2 });
 
   if (room.type === "BOSS") {
+    // Sorteio de Boss entre as 3 variantes épicas
+    const bossPool = ["boss_synth_lord", "boss_bouncing_orb", "boss_triangle_spiral"];
+    const bossDefId = bossPool[(level - 1) % bossPool.length]!;
+
     const boss = makeEnemy(
-      "boss_synth_lord",
+      bossDefId,
       (ROOM_W * TILE) / 2,
-      (ROOM_H * TILE) / 2 - 40,
+      (ROOM_H * TILE) / 2 - 30,
       level,
       true,
     );
     return [boss];
   }
+
 
   const n = Math.min(enemyCount(level), spots.length);
   const out: Enemy[] = [];

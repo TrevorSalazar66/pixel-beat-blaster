@@ -1,0 +1,16 @@
+# Configuração de Deploy Koyeb
+
+# 1. Crie uma conta ou acesse: https://app.koyeb.com
+# 2. Crie uma nova App -> "GitHub" -> Selecione seu repositório: TrevorSalazar66/pixel-beat-blaster
+# 3. Configure o Build & Runtime:
+#    - Builder: Buildpack (Node.js) ou Docker
+#    - Build command: npm install && npx tsc src/server-backend.ts --outDir dist-server --module nodenext --moduleResolution nodenext
+#    - Run command: node dist-server/server-backend.js
+#    - Port: 8000
+#    - Protocol: HTTP
+#    - Routes: / (ou /api)
+#
+# Variáveis de Ambiente (Koyeb Environment Variables):
+# - PORT=8000
+# - SUPABASE_URL=https://your-project.supabase.co
+# - SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
