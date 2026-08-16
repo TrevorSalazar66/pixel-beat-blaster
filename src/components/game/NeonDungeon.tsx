@@ -983,9 +983,21 @@ export function NeonDungeon() {
           const near = Math.hypot(p.x - player.current.x, p.y - player.current.y) < 34;
           if (near) {
             const def = SHOP_ITEMS.find((i) => i.id === p.item)!;
-            if (coinsRef.current >= def.cost) buy(p);
+            if (coinsRef.current >= itemCost(def, floorRef.current.level)) buy(p);
           }
         }
+
+        /* Forja: abre ao encostar no altar (semi-rara) */
+        if (r.type === "FORGE") {
+          const near2 =
+            Math.hypot(player.current.x - W / 2, player.current.y - (H / 2 - 20)) < 46;
+          if (near2 && !forgeNear.current) {
+            forgeNear.current = true;
+            setForgeMsg(null);
+            setForgeOpen(true);
+          }
+          if (!near2) forgeNear.current = false;
+        } else forgeNear.current = false;
       }
 
       /* enemies */
@@ -1459,9 +1471,33 @@ export function NeonDungeon() {
           ctx.fillStyle = def.color;
           ctx.fillText(p.sold ? "VENDIDO" : def.label.toUpperCase(), p.x, p.y - 26);
           ctx.fillStyle = "#ffe23d";
-          ctx.fillText(p.sold ? "" : `${def.cost} ♪`, p.x, p.y + 34);
+          ctx.fillText(
+            p.sold ? "" : `${itemCost(def, floorRef.current.level)} ♪`,
+            p.x,
+            p.y + 34,
+          );
           ctx.globalAlpha = 1;
         }
+        ctx.restore();
+      }
+
+      /* forja: altar ritmico */
+      if (cur.type === "FORGE") {
+        const ax = W / 2;
+        const ay = H / 2 - 20;
+        ctx.save();
+        ctx.shadowBlur = 22;
+        ctx.shadowColor = "#ffe23d";
+        ctx.strokeStyle = "#ffe23d";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(ax - 22, ay - 18, 44, 36);
+        ctx.globalAlpha = 0.5 + Math.sin(now / 200) * 0.3;
+        ctx.fillStyle = "#ffe23d";
+        ctx.fillRect(ax - 10, ay - 8, 20, 16);
+        ctx.globalAlpha = 1;
+        ctx.font = "8px 'Press Start 2P', monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("FORJA", ax, ay - 28);
         ctx.restore();
       }
 
