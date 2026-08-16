@@ -61,7 +61,17 @@ type Blast = {
   stun?: number;
 };
 /** Poca de som: dano continuo em area (Synth base). */
-type Pool = { x: number; y: number; r: number; t: number; life: number; dmg: number; tick: number };
+type Pool = {
+  x: number;
+  y: number;
+  r: number;
+  t: number;
+  life: number;
+  dmg: number;
+  tick: number;
+  /** empurra inimigos com 30% de chance por tique (SYNTH) */
+  push?: number;
+};
 /** Feixe laser continuo (Beam Synth). */
 type Beam = { x: number; y: number; a: number; t: number; life: number; dmg: number; tick: number };
 type Pickup = { x: number; y: number; kind: "block" | "coin"; track?: TrackId; color: string };
@@ -490,14 +500,14 @@ export function NeonDungeon() {
       /* Acoes ofensivas diretas */
       if (variant === 1) {
         // Sub-Kick: disparo duplo rapido de menor dano
-        for (const off of [-0.07, 0.07])
+          for (const off of [-0.07, 0.07])
           shoot({
             vx: Math.cos(a + off) * 420,
             vy: Math.sin(a + off) * 420,
             r: 5 * sMul,
             dmg: 5 * dMul,
             life: 1.6,
-            knock: 8,
+            knock: Math.random() < 0.05 ? 6 : 0,
           });
       } else if (variant === 2) {
         // Explosive Kick: explode em area ao impactar
@@ -510,13 +520,13 @@ export function NeonDungeon() {
           pierce: false,
         });
       } else {
-        // Base: projetil pesado com knockback
+        // Base: projetil pesado (5% de chance de um empurrao curto)
         shoot({
           vx: f.x * 300,
           vy: f.y * 300,
           r: 8 * sMul,
           dmg: 12 * dMul,
-          knock: 46,
+          knock: Math.random() < 0.05 ? 10 : 0,
         });
       }
       pulse.current = 1;
@@ -614,14 +624,14 @@ export function NeonDungeon() {
       // Vamp Bass: janela de cura ao derrotar inimigos sob o som
       vamp.current = 2;
       pools.current.push({
-        x: cx, y: cy, r: 70 * sMul, t: 0, life: 2, dmg: 1.5 * dMul, tick: 0,
+        x: cx, y: cy, r: 70 * sMul, t: 0, life: 2, dmg: 1.5 * dMul, tick: 0, push: 34,
       });
       return;
     }
     // Base: poca de som no chao por 2s
     pools.current.push({
       x: cx + f.x * 40, y: cy + f.y * 40,
-      r: 62 * sMul, t: 0, life: 2, dmg: 3 * dMul, tick: 0,
+      r: 62 * sMul, t: 0, life: 2, dmg: 3 * dMul, tick: 0, push: 40,
     });
   }, []);
 
