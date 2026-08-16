@@ -38,6 +38,19 @@ export type AnchoredPos = { anchor: Anchor; dx: number; dy: number };
 /** Zonas dos polegares: cantos inferiores reservados para os analogicos. */
 export const THUMB_ZONE = { y: 64, left: 30, right: 70 };
 
+/** Estado de input compartilhado entre a UI touch e o loop do jogo. */
+export type TouchInput = {
+  move: { x: number; y: number };
+  aimActive: boolean;
+  aim: { x: number; y: number };
+};
+
+export const createTouchInput = (): TouchInput => ({
+  move: { x: 0, y: 0 },
+  aimActive: false,
+  aim: { x: 1, y: 0 },
+});
+
 export const GAME_SETTINGS_KEY = "neon_game_settings";
 export const HUD_LAYOUT_KEY = "custom_hud_layout";
 
