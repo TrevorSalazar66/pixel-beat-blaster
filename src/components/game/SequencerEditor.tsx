@@ -131,49 +131,35 @@ export function SequencerEditor({
       </div>
 
       <div className="rounded-lg border border-neon-purple/40 bg-panel p-3">
-        <div className="mb-2 font-pixel text-[8px] uppercase tracking-widest text-neon-purple">
-          Variação a colocar
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {([0, 1, 2] as Variant[]).map((v) => {
-            const label = selTrack ? VARIANTS[selTrack.id][v] : ["Base", "Variação A", "Variação B"][v];
-            const color = selTrack?.color ?? "#b14dff";
-            return (
-              <button
-                key={v}
-                type="button"
-                onClick={() => setVariant(v)}
-                className="rounded-sm border px-3 py-1.5 font-pixel text-[7px] uppercase"
-                style={{
-                  borderColor: color,
-                  color,
-                  background: variant === v ? `${color}33` : "transparent",
-                  boxShadow: variant === v ? `0 0 12px ${color}` : "none",
-                }}
-              >
-                {v === 0 ? "Base" : v === 1 ? "A" : "B"} · {label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-neon-purple/40 bg-panel p-3">
         <div className="mb-3 font-pixel text-[8px] uppercase tracking-widest text-neon-purple">
           Mochila de Blocos
         </div>
         <div className="flex flex-wrap gap-3">
           {TRACKS.flatMap((track) =>
-            [false, true].map((rare) => {
-              const count = rare ? rareInventory[track.id] ?? 0 : inventory[track.id] ?? 0;
+            (
+              [
+                { rare: false, variant: 0 as Variant },
+                { rare: true, variant: 0 as Variant },
+                { rare: false, variant: 1 as Variant },
+                { rare: false, variant: 2 as Variant },
+              ] as const
+            ).map(({ rare, variant }) => {
+              const vars = varInventory[track.id] ?? [0, 0];
+              const count = rare
+                ? rareInventory[track.id] ?? 0
+                : variant === 0
+                  ? inventory[track.id] ?? 0
+                  : vars[variant - 1] ?? 0;
               if (count <= 0) return null;
-              const active = sel?.track === track.id && sel.rare === rare;
+              const active =
+                sel?.track === track.id && sel.rare === rare && sel.variant === variant;
               return (
                 <button
-                  key={`${track.id}-${rare}`}
+                  key={`${track.id}-${rare}-${variant}`}
                   type="button"
+                  title={VARIANTS[track.id][variant]}
                   onClick={() => {
-                    setSel(active ? null : { track: track.id, rare });
+                    setSel(active ? null : { track: track.id, rare, variant });
                     setMode("place");
                   }}
                   className="flex h-16 w-20 flex-col items-center justify-center gap-1 rounded-md border font-pixel text-[7px] uppercase"
@@ -185,19 +171,27 @@ export function SequencerEditor({
                   }}
                 >
                   <span
-                    className="h-4 w-4 rounded-[2px]"
+                    className="flex h-4 w-4 items-center justify-center rounded-[2px] text-[6px] text-background"
                     style={{
                       background: rare ? "#ffffff" : track.color,
                       boxShadow: `0 0 10px ${track.color}`,
                     }}
-                  />
-                  {rare ? `${track.short}+` : track.short}
+                  >
+                    {VARIANT_TAG[variant]}
+                  </span>
+                  {rare ? `${track.short}+` : `${track.short}${VARIANT_TAG[variant]}`}
                   <span className="text-muted-foreground">x{count}</span>
                 </button>
               );
             }),
           )}
-          {TRACKS.every((t) => (inventory[t.id] ?? 0) <= 0 && (rareInventory[t.id] ?? 0) <= 0) && (
+          {TRACKS.every(
+            (t) =>
+              (inventory[t.id] ?? 0) <= 0 &&
+              (rareInventory[t.id] ?? 0) <= 0 &&
+              ((varInventory[t.id] ?? [0, 0])[0] ?? 0) <= 0 &&
+              ((varInventory[t.id] ?? [0, 0])[1] ?? 0) <= 0,
+          ) && (
             <span className="font-pixel text-[8px] text-muted-foreground">
               Mochila vazia — derrote inimigos para coletar blocos.
             </span>
@@ -206,9 +200,9 @@ export function SequencerEditor({
       </div>
 
       <p className="font-pixel text-[7px] leading-relaxed text-muted-foreground">
-        Escolha a variação, clique num bloco da mochila e depois num passo da trilha. No modo
-        Variação, toque num passo ocupado para alternar Base / A / B. O loop continua tocando em
-        background.
+        Clique num bloco da mochila e depois num passo da trilha. A variação do bloco é fixa: só a
+        Forja (sala ⚒) transforma blocos normais iguais em variações A ou B. O loop continua tocando
+        em background.
       </p>
     </div>
   );
