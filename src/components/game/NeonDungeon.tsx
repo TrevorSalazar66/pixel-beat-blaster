@@ -1132,6 +1132,17 @@ export function NeonDungeon() {
                 e.hp -= pl.dmg;
                 e.hitFlash = 0.1;
                 if (vamp.current > 0) e.vamp = 1.2;
+                /* 30% de chance de empurrar cada inimigo na area do SYNTH */
+                if (pl.push && Math.random() < 0.3) {
+                  const dx = e.x - pl.x;
+                  const dy = e.y - pl.y;
+                  const d = Math.hypot(dx, dy) || 1;
+                  const kx = e.x + (dx / d) * pl.push;
+                  const ky = e.y + (dy / d) * pl.push;
+                  if (!enemyBlocked(cur, kx, e.y, true, e.size)) e.x = kx;
+                  if (!enemyBlocked(cur, e.x, ky, true, e.size)) e.y = ky;
+                  clampToRoom(e);
+                }
               }
             }
           }
