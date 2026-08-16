@@ -66,6 +66,14 @@ type Shot = {
   explode?: boolean;
   /** persegue o inimigo mais proximo */
   homing?: number;
+  /** skin do projetil por variacao do bloco */
+  shape?: "square" | "circle" | "triangle" | "diamond" | "star";
+  /** ricochetes restantes nas paredes */
+  bounce?: number;
+  /** explode sozinho ao fim da vida (bombas) */
+  fuse?: boolean;
+  /** raio/dano da explosao */
+  boomR?: number;
 };
 type Blast = {
   x: number;
