@@ -2,13 +2,14 @@ import { useState } from "react";
 import type { TrackId } from "@/lib/chiptune";
 import { STEPS, TRACKS, VARIANTS, VARIANT_TAG, type Pattern, type Variant } from "./tracks";
 
-type Sel = { track: TrackId; rare: boolean } | null;
-type Mode = "place" | "variant" | "remove";
+type Sel = { track: TrackId; rare: boolean; variant: Variant } | null;
+type Mode = "place" | "remove";
 
 type Props = {
   pattern: Pattern;
   inventory: Record<TrackId, number>;
   rareInventory: Record<TrackId, number>;
+  varInventory: Record<TrackId, [number, number]>;
   bpm: number;
   currentStep: number;
   onPlace: (
@@ -17,7 +18,6 @@ type Props = {
     block: { track: TrackId; rare: boolean; variant: Variant },
   ) => void;
   onRemove: (trackIndex: number, step: number) => void;
-  onCycleVariant: (trackIndex: number, step: number) => void;
   onClose: () => void;
 };
 
@@ -25,40 +25,37 @@ export function SequencerEditor({
   pattern,
   inventory,
   rareInventory,
+  varInventory,
   bpm,
   currentStep,
   onPlace,
   onRemove,
-  onCycleVariant,
   onClose,
 }: Props) {
   const [sel, setSel] = useState<Sel>(null);
-  const [variant, setVariant] = useState<Variant>(0);
   const [mode, setMode] = useState<Mode>("place");
 
   const clickSlot = (t: number, s: number) => {
     const trackId = TRACKS[t]?.id;
     if (!trackId) return;
     const cell = pattern[t]?.[s] ?? null;
-    if (mode === "variant") {
-      if (cell) onCycleVariant(t, s);
-      return;
-    }
     if (mode === "remove") {
       if (cell) onRemove(t, s);
       return;
     }
     if (sel) {
       if (sel.track !== trackId) return;
-      onPlace(t, s, { ...sel, variant });
-      const left = sel.rare ? rareInventory[sel.track] ?? 0 : inventory[sel.track] ?? 0;
+      onPlace(t, s, sel);
+      const left = sel.rare
+        ? rareInventory[sel.track] ?? 0
+        : sel.variant === 0
+          ? inventory[sel.track] ?? 0
+          : (varInventory[sel.track] ?? [0, 0])[sel.variant - 1] ?? 0;
       if (left - 1 <= 0) setSel(null);
     } else if (cell) {
       onRemove(t, s);
     }
   };
-
-  const selTrack = TRACKS.find((t) => t.id === sel?.track) ?? null;
 
   return (
     <div className="absolute inset-0 z-40 flex flex-col gap-3 overflow-auto bg-background/97 p-4 backdrop-blur-sm">
@@ -79,7 +76,7 @@ export function SequencerEditor({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {(["place", "variant", "remove"] as const).map((m) => (
+        {(["place", "remove"] as const).map((m) => (
           <button
             key={m}
             type="button"
@@ -90,7 +87,7 @@ export function SequencerEditor({
                 : "border-muted text-muted-foreground"
             }`}
           >
-            {m === "place" ? "Colocar" : m === "variant" ? "Variação" : "Remover"}
+            {m === "place" ? "Colocar" : "Remover"}
           </button>
         ))}
       </div>

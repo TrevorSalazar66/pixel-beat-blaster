@@ -1956,12 +1956,24 @@ export function NeonDungeon() {
             pattern={pattern}
             inventory={inventory}
             rareInventory={rareInventory}
+            varInventory={varInventory}
             bpm={bpm}
             currentStep={currentStep}
             onPlace={placeBlock}
             onRemove={removeBlock}
-            onCycleVariant={cycleVariant}
             onClose={() => setEditorOpen(false)}
+          />
+        )}
+
+        {forgeOpen && !dead && (
+          <ForgeModal
+            level={floor.level}
+            coins={coins}
+            inventory={inventory}
+            varInventory={varInventory}
+            message={forgeMsg}
+            onForge={forge}
+            onClose={() => setForgeOpen(false)}
           />
         )}
 
