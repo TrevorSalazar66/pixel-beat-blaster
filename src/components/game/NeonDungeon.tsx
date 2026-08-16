@@ -573,24 +573,30 @@ export function NeonDungeon() {
     if (track.id === "kick") {
       /* Acoes ofensivas diretas */
       if (variant === 1) {
-        // Sub-Kick: disparo duplo rapido de menor dano
+        // Sub-Kick: disparo duplo rapido que ricocheteia nas paredes
         for (const off of [-0.07, 0.07])
           shoot({
             vx: Math.cos(a + off) * 420,
             vy: Math.sin(a + off) * 420,
             r: 5 * sMul,
             dmg: 5 * dMul,
-            life: 1.6,
+            life: 2.2,
+            shape: "diamond",
+            bounce: 3,
             knock: Math.random() < 0.05 ? 6 : 0,
           });
       } else if (variant === 2) {
-        // Explosive Kick: explode em area ao impactar
+        // Explosive Kick: bomba lenta que explode em area media
         shoot({
-          vx: f.x * 280,
-          vy: f.y * 280,
-          r: 9 * sMul,
+          vx: f.x * 240,
+          vy: f.y * 240,
+          r: 10 * sMul,
           dmg: 7 * dMul,
           explode: true,
+          fuse: true,
+          life: 1.1,
+          boomR: 360,
+          shape: "circle",
           pierce: false,
         });
       } else {
@@ -600,6 +606,7 @@ export function NeonDungeon() {
           vy: f.y * 300,
           r: 8 * sMul,
           dmg: 12 * dMul,
+          shape: "square",
           knock: Math.random() < 0.05 ? 10 : 0,
         });
       }
@@ -610,23 +617,33 @@ export function NeonDungeon() {
     if (track.id === "hat") {
       /* Velocidade e projecao rapida */
       if (variant === 1) {
-        // Dash Hat: impulso curto na direcao do movimento
+        // Dash Hat: impulso curto + rastro sonoro que fere quem tocar
         const mv = lastMove.current;
         const len = Math.hypot(mv.x, mv.y);
         const dx = len > 0.05 ? mv.x / len : f.x;
         const dy = len > 0.05 ? mv.y / len : f.y;
         dash.current = { x: dx, y: dy, t: 0.16 };
         invuln.current = Math.max(invuln.current, 0.16);
+        pools.current.push({
+          x: cx,
+          y: cy,
+          r: 34 * sMul,
+          t: 0,
+          life: 0.9,
+          dmg: 2 * dMul,
+          tick: 0,
+        });
       } else if (variant === 2) {
-        // Homing Hat: 2 projeteis teleguiados
+        // Homing Hat: 2 triangulos teleguiados persistentes
         for (const off of [-0.25, 0.25])
           shoot({
             vx: Math.cos(a + off) * 460,
             vy: Math.sin(a + off) * 460,
             r: 4 * sMul,
             dmg: 3 * dMul,
-            life: 2.2,
-            homing: 6,
+            life: 3,
+            homing: 9,
+            shape: "triangle",
           });
       } else {
         // Base: leque triplo rapido
@@ -637,6 +654,7 @@ export function NeonDungeon() {
             r: 3.5 * sMul,
             dmg: 2 * dMul,
             life: 1.2,
+            shape: "square",
           });
       }
       return;
@@ -645,14 +663,25 @@ export function NeonDungeon() {
     if (track.id === "snare") {
       /* Defensivo e controle de grupo */
       if (variant === 1) {
-        // Shield Snare: 0.5s de invulnerabilidade total
+        // Shield Snare: 0.5s de invulnerabilidade + reflete tiros inimigos
         shield.current = Math.max(shield.current, 0.5);
         invuln.current = Math.max(invuln.current, 0.5);
+        for (const sh of shots.current) {
+          if (!sh.hostile) continue;
+          if (Math.hypot(sh.x - cx, sh.y - cy) < 150) {
+            sh.hostile = false;
+            sh.vx *= -1;
+            sh.vy *= -1;
+            sh.color = "#2ec8ff";
+            sh.shape = "star";
+            sh.hit = new Set<string>();
+          }
+        }
         blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set(), color: "#2ec8ff", dmg: 0 });
         return;
       }
       if (variant === 2) {
-        // Stun Snare: paralisa em raio curto por 1.5s
+        // Stun Snare: paralisa em raio curto por 1.5s e anula bombas
         blasts.current.push({
           x: cx,
           y: cy,
@@ -664,6 +693,9 @@ export function NeonDungeon() {
           maxT: 0.55,
           stun: 1.5,
         });
+        shots.current = shots.current.filter(
+          (sh) => !(sh.hostile && sh.fuse && Math.hypot(sh.x - cx, sh.y - cy) < 130),
+        );
         for (const e of r.enemies) {
           if (Math.hypot(e.x - cx, e.y - cy) < 110) e.stun = Math.max(e.stun, 1.5);
         }
