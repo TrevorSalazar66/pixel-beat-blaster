@@ -161,11 +161,13 @@ export function NeonDungeon() {
   const coinsRef = useRef(coins);
   maxHpRef.current = maxHp;
   coinsRef.current = coins;
+  const invRef = useRef(inventory);
+  invRef.current = inventory;
   const deadRef = useRef(dead);
   deadRef.current = dead;
   const frozenRef = useRef(false);
   frozenRef.current =
-    paused || editorOpen || dead || settingsOpen || hudEditing || transition !== null;
+    paused || editorOpen || dead || settingsOpen || hudEditing || forgeOpen || transition !== null;
 
   const keys = useRef<Record<string, boolean>>({});
   const player = useRef<Vec>({ x: W / 2, y: H / 2 });
@@ -186,20 +188,35 @@ export function NeonDungeon() {
   const invuln = useRef(0);
   const spikeT = useRef(0);
   const glitch = useRef(0);
+  const forgeNear = useRef(false);
 
   const room = () => floorRef.current.rooms[roomIdRef.current]!;
 
   /* ---------- editor actions ---------- */
+  /** Move blocos entre as mochilas (normal / raro / variacao A-B). */
+  const giveBlock = useCallback(
+    (track: TrackId, rare: boolean, variant: Variant, d: number) => {
+      if (rare) {
+        setRareInventory((inv) => ({ ...inv, [track]: Math.max(0, (inv[track] ?? 0) + d) }));
+      } else if (variant === 0) {
+        setInventory((inv) => ({ ...inv, [track]: Math.max(0, (inv[track] ?? 0) + d) }));
+      } else {
+        setVarInventory((inv) => {
+          const cur = inv[track] ?? [0, 0];
+          const next: [number, number] = [cur[0], cur[1]];
+          next[variant - 1] = Math.max(0, next[variant - 1] + d);
+          return { ...inv, [track]: next };
+        });
+      }
+    },
+    [],
+  );
+
   const placeBlock = useCallback(
     (t: number, s: number, block: { track: TrackId; rare: boolean; variant: Variant }) => {
       const prev = patternRef.current[t]?.[s] ?? null;
-      const setInv = block.rare ? setRareInventory : setInventory;
-      setInv((inv) => ({ ...inv, [block.track]: Math.max(0, (inv[block.track] ?? 0) - 1) }));
-      if (prev) {
-        const back = prev.rare ? setRareInventory : setInventory;
-        const trackId = TRACKS[t]!.id;
-        back((inv) => ({ ...inv, [trackId]: (inv[trackId] ?? 0) + 1 }));
-      }
+      giveBlock(block.track, block.rare, block.variant, -1);
+      if (prev) giveBlock(TRACKS[t]!.id, prev.rare, prev.variant, 1);
       setPattern((p) =>
         p.map((row, i) =>
           i === t
@@ -208,29 +225,47 @@ export function NeonDungeon() {
         ),
       );
     },
-    [],
+    [giveBlock],
   );
 
-  const removeBlock = useCallback((t: number, s: number) => {
-    const prev = patternRef.current[t]?.[s] ?? null;
-    if (!prev) return;
-    const trackId = TRACKS[t]!.id;
-    const back = prev.rare ? setRareInventory : setInventory;
-    back((inv) => ({ ...inv, [trackId]: (inv[trackId] ?? 0) + 1 }));
-    setPattern((p) => p.map((row, i) => (i === t ? row.map((c, j) => (j === s ? null : c)) : row)));
-  }, []);
+  const removeBlock = useCallback(
+    (t: number, s: number) => {
+      const prev = patternRef.current[t]?.[s] ?? null;
+      if (!prev) return;
+      giveBlock(TRACKS[t]!.id, prev.rare, prev.variant, 1);
+      setPattern((p) =>
+        p.map((row, i) => (i === t ? row.map((c, j) => (j === s ? null : c)) : row)),
+      );
+    },
+    [giveBlock],
+  );
 
-  const cycleVariant = useCallback((t: number, s: number) => {
-    setPattern((p) =>
-      p.map((row, i) =>
-        i === t
-          ? row.map((c, j) =>
-              j === s && c ? { ...c, variant: (((c.variant + 1) % 3) as Variant) } : c,
-            )
-          : row,
-      ),
-    );
-  }, []);
+  /* ---------- forja: unica fonte de blocos de variacao ---------- */
+  const forge = useCallback(
+    (track: TrackId) => {
+      const level = floorRef.current.level;
+      const fee = forgeFee(level);
+      if (coinsRef.current < fee || (invRef.current[track] ?? 0) < FORGE_INPUT) {
+        setForgeMsg("Blocos ou notas insuficientes.");
+        return;
+      }
+      setCoins((c) => c - fee);
+      setInventory((inv) => ({
+        ...inv,
+        [track]: Math.max(0, (inv[track] ?? 0) - FORGE_INPUT),
+      }));
+      const roll = Math.random();
+      const variant: Variant = roll < FORGE_VARIANT_CHANCE ? 1 : roll < FORGE_VARIANT_CHANCE * 2 ? 2 : 0;
+      giveBlock(track, false, variant, 1);
+      setForgeMsg(
+        variant === 0
+          ? "A fusão colapsou num bloco normal."
+          : `Forjado: variação ${variant === 1 ? "A" : "B"}!`,
+      );
+      playTrack(track);
+    },
+    [giveBlock],
+  );
 
   /* ---------- helpers ---------- */
   const tileAt = (r: Room, px: number, py: number) => {
