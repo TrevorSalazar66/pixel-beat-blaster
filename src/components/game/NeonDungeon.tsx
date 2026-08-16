@@ -30,6 +30,7 @@ import {
   rollEnemyId,
   scaledDamage,
   scaledHp,
+  type Enemy,
 } from "./dungeon/enemies";
 import {
   FORGE_INPUT,
