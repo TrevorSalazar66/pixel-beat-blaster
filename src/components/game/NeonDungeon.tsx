@@ -1021,7 +1021,8 @@ export function NeonDungeon() {
             continue;
           }
           const spd = e.behavior === "SIREN_SPEED_AURA" ? 1 : auraMul;
-          const flying = e.behavior === "FLY_IGNORES_CHASMS";
+          const flying =
+            e.behavior === "FLY_IGNORES_CHASMS" || e.behavior === "FLY_TELEPORT_BLINK";
           const ex = player.current.x - e.x;
           const ey = player.current.y - e.y;
           const dist = Math.hypot(ex, ey) || 1;
@@ -1031,7 +1032,10 @@ export function NeonDungeon() {
             flying ||
             e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES" ||
             e.behavior === "BASS_DROP_SHOCKWAVE" ||
-            e.behavior === "SIREN_SPEED_AURA"
+            e.behavior === "SIREN_SPEED_AURA" ||
+            e.behavior === "DASH_CHARGE" ||
+            e.behavior === "SIREN_HEALER" ||
+            e.behavior === "BASS_QUAKE_DOUBLE"
           ) {
             const nx = e.x + (ex / dist) * e.speed * spd * dt;
             const ny = e.y + (ey / dist) * e.speed * spd * dt;
@@ -1039,6 +1043,105 @@ export function NeonDungeon() {
             if (!enemyBlocked(cur, e.x, ny, flying, e.size)) e.y = ny;
           }
           clampToRoom(e);
+
+          /* ---------- variantes elite ---------- */
+          if (e.behavior === "DASH_CHARGE") {
+            /* investida reta em alta velocidade */
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if ((e.dashT ?? 0) > 0) {
+              e.dashT = Math.max(0, (e.dashT ?? 0) - dt);
+              const nx = e.x + (e.dvx ?? 0) * 520 * dt;
+              const ny = e.y + (e.dvy ?? 0) * 520 * dt;
+              if (!enemyBlocked(cur, nx, e.y, false, e.size)) e.x = nx;
+              else e.dashT = 0;
+              if (!enemyBlocked(cur, e.x, ny, false, e.size)) e.y = ny;
+              else e.dashT = 0;
+              clampToRoom(e);
+            } else if (e.cooldown <= 0 && dist < 320) {
+              e.cooldown = getDef(e.defId).fireRate ?? 2.2;
+              e.dashT = 0.3;
+              e.dvx = ex / dist;
+              e.dvy = ey / dist;
+              e.hitFlash = 0.12;
+            }
+          }
+
+          if (e.behavior === "SHOOT_SPREAD_BURST") {
+            /* rajada tripla em leque */
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = getDef(e.defId).fireRate ?? 2.4;
+              if (dist < 620 && hasLineOfSight(cur, e.x, e.y, player.current.x, player.current.y)) {
+                const base = Math.atan2(ey, ex);
+                for (const off of [-0.24, 0, 0.24])
+                  shots.current.push({
+                    x: e.x, y: e.y,
+                    vx: Math.cos(base + off) * 300,
+                    vy: Math.sin(base + off) * 300,
+                    life: 2.4, color: e.color, r: 4, dmg: e.damage,
+                    hostile: true, pierce: false,
+                  });
+              }
+            }
+          }
+
+          if (e.behavior === "FLY_TELEPORT_BLINK") {
+            /* pisca para perto do jogador */
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = getDef(e.defId).fireRate ?? 2.8;
+              const ang = Math.random() * Math.PI * 2;
+              const spot = safeDropSpot(
+                cur,
+                player.current.x + Math.cos(ang) * 76,
+                player.current.y + Math.sin(ang) * 76,
+              );
+              e.x = spot.x;
+              e.y = spot.y;
+              clampToRoom(e);
+              e.spawnT = 0.2;
+              e.hitFlash = 0.2;
+            }
+          }
+
+          if (e.behavior === "SIREN_HEALER") {
+            /* cura aliados proximos em pulsos */
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = getDef(e.defId).fireRate ?? 3;
+              let healed = false;
+              for (const o of cur.enemies) {
+                if (o.uid === e.uid || o.hp <= 0 || o.hp >= o.maxHp) continue;
+                if (Math.hypot(o.x - e.x, o.y - e.y) < 170) {
+                  o.hp = Math.min(o.maxHp, o.hp + Math.ceil(o.maxHp * 0.12));
+                  healed = true;
+                }
+              }
+              if (healed)
+                blasts.current.push({
+                  x: e.x, y: e.y, t: 0, hit: new Set(),
+                  dmg: 0, speed: 210, maxT: 0.55, color: "#ff5fa8",
+                });
+            }
+          }
+
+          if (e.behavior === "BASS_QUAKE_DOUBLE") {
+            /* onda dupla concentrica */
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = getDef(e.defId).fireRate ?? 3.2;
+              if (dist < 240) {
+                blasts.current.push({
+                  x: e.x, y: e.y, t: 0, hit: new Set(),
+                  hostile: true, dmg: e.damage, speed: 320, maxT: 0.6, color: "#ff9500",
+                });
+                blasts.current.push({
+                  x: e.x, y: e.y, t: 0, hit: new Set(),
+                  hostile: true, dmg: e.damage, speed: 170, maxT: 0.95, color: "#ffbd55",
+                });
+              }
+            }
+          }
 
           if (e.behavior === "SHOOT_AT_PLAYER_PERIODIC" || e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
             const boss = e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES";
