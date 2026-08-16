@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 export type Orientation = "PORTRAIT" | "LANDSCAPE";
 
 export interface MobileControlConfig {
@@ -61,9 +63,9 @@ export const DEFAULT_LAYOUT: Record<Orientation, Record<HUDElementId, AnchoredPo
 };
 
 /** Converte ancoragem + offset em estilo CSS relativo (sem pixels fixos). */
-export function anchorStyle(pos: AnchoredPos): React.CSSProperties {
+export function anchorStyle(pos: AnchoredPos): CSSProperties {
   const a = pos.anchor;
-  const style: React.CSSProperties = { position: "absolute" };
+  const style: CSSProperties = { position: "absolute" };
   const tx: string[] = [];
   if (a.endsWith("LEFT")) style.left = `${pos.dx}%`;
   else if (a.endsWith("RIGHT")) style.right = `${-pos.dx}%`;
