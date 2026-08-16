@@ -51,9 +51,9 @@ export const ENEMY_DEFS: EnemyDef[] = [
   {
     id: "boss_synth_lord",
     name: "O Maestro Subwoofer",
-    hpBase: 150,
-    damageBase: 2,
-    speed: 1.0,
+    hpBase: 210,
+    damageBase: 3,
+    speed: 1.25,
     behavior: "BOSS_PATTERN_WAVES_AND_PROJECTILES",
     color: "#aa00ff",
   },
