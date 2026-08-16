@@ -30,6 +30,7 @@ import {
   rollEnemyId,
   scaledDamage,
   scaledHp,
+  type Enemy,
 } from "./dungeon/enemies";
 import {
   FORGE_INPUT,
@@ -66,6 +67,14 @@ type Shot = {
   explode?: boolean;
   /** persegue o inimigo mais proximo */
   homing?: number;
+  /** skin do projetil por variacao do bloco */
+  shape?: "square" | "circle" | "triangle" | "diamond" | "star";
+  /** ricochetes restantes nas paredes */
+  bounce?: number;
+  /** explode sozinho ao fim da vida (bombas) */
+  fuse?: boolean;
+  /** raio/dano da explosao */
+  boomR?: number;
 };
 type Blast = {
   x: number;
@@ -565,24 +574,30 @@ export function NeonDungeon() {
     if (track.id === "kick") {
       /* Acoes ofensivas diretas */
       if (variant === 1) {
-        // Sub-Kick: disparo duplo rapido de menor dano
+        // Sub-Kick: disparo duplo rapido que ricocheteia nas paredes
         for (const off of [-0.07, 0.07])
           shoot({
             vx: Math.cos(a + off) * 420,
             vy: Math.sin(a + off) * 420,
             r: 5 * sMul,
             dmg: 5 * dMul,
-            life: 1.6,
+            life: 2.2,
+            shape: "diamond",
+            bounce: 3,
             knock: Math.random() < 0.05 ? 6 : 0,
           });
       } else if (variant === 2) {
-        // Explosive Kick: explode em area ao impactar
+        // Explosive Kick: bomba lenta que explode em area media
         shoot({
-          vx: f.x * 280,
-          vy: f.y * 280,
-          r: 9 * sMul,
+          vx: f.x * 240,
+          vy: f.y * 240,
+          r: 10 * sMul,
           dmg: 7 * dMul,
           explode: true,
+          fuse: true,
+          life: 1.1,
+          boomR: 360,
+          shape: "circle",
           pierce: false,
         });
       } else {
@@ -592,6 +607,7 @@ export function NeonDungeon() {
           vy: f.y * 300,
           r: 8 * sMul,
           dmg: 12 * dMul,
+          shape: "square",
           knock: Math.random() < 0.05 ? 10 : 0,
         });
       }
@@ -602,23 +618,33 @@ export function NeonDungeon() {
     if (track.id === "hat") {
       /* Velocidade e projecao rapida */
       if (variant === 1) {
-        // Dash Hat: impulso curto na direcao do movimento
+        // Dash Hat: impulso curto + rastro sonoro que fere quem tocar
         const mv = lastMove.current;
         const len = Math.hypot(mv.x, mv.y);
         const dx = len > 0.05 ? mv.x / len : f.x;
         const dy = len > 0.05 ? mv.y / len : f.y;
         dash.current = { x: dx, y: dy, t: 0.16 };
         invuln.current = Math.max(invuln.current, 0.16);
+        pools.current.push({
+          x: cx,
+          y: cy,
+          r: 34 * sMul,
+          t: 0,
+          life: 0.9,
+          dmg: 2 * dMul,
+          tick: 0,
+        });
       } else if (variant === 2) {
-        // Homing Hat: 2 projeteis teleguiados
+        // Homing Hat: 2 triangulos teleguiados persistentes
         for (const off of [-0.25, 0.25])
           shoot({
             vx: Math.cos(a + off) * 460,
             vy: Math.sin(a + off) * 460,
             r: 4 * sMul,
             dmg: 3 * dMul,
-            life: 2.2,
-            homing: 6,
+            life: 3,
+            homing: 9,
+            shape: "triangle",
           });
       } else {
         // Base: leque triplo rapido
@@ -629,6 +655,7 @@ export function NeonDungeon() {
             r: 3.5 * sMul,
             dmg: 2 * dMul,
             life: 1.2,
+            shape: "square",
           });
       }
       return;
@@ -637,14 +664,25 @@ export function NeonDungeon() {
     if (track.id === "snare") {
       /* Defensivo e controle de grupo */
       if (variant === 1) {
-        // Shield Snare: 0.5s de invulnerabilidade total
+        // Shield Snare: 0.5s de invulnerabilidade + reflete tiros inimigos
         shield.current = Math.max(shield.current, 0.5);
         invuln.current = Math.max(invuln.current, 0.5);
+        for (const sh of shots.current) {
+          if (!sh.hostile) continue;
+          if (Math.hypot(sh.x - cx, sh.y - cy) < 150) {
+            sh.hostile = false;
+            sh.vx *= -1;
+            sh.vy *= -1;
+            sh.color = "#2ec8ff";
+            sh.shape = "star";
+            sh.hit = new Set<string>();
+          }
+        }
         blasts.current.push({ x: cx, y: cy, t: 0, hit: new Set(), color: "#2ec8ff", dmg: 0 });
         return;
       }
       if (variant === 2) {
-        // Stun Snare: paralisa em raio curto por 1.5s
+        // Stun Snare: paralisa em raio curto por 1.5s e anula bombas
         blasts.current.push({
           x: cx,
           y: cy,
@@ -656,6 +694,9 @@ export function NeonDungeon() {
           maxT: 0.55,
           stun: 1.5,
         });
+        shots.current = shots.current.filter(
+          (sh) => !(sh.hostile && sh.fuse && Math.hypot(sh.x - cx, sh.y - cy) < 130),
+        );
         for (const e of r.enemies) {
           if (Math.hypot(e.x - cx, e.y - cy) < 110) e.stun = Math.max(e.stun, 1.5);
         }
@@ -684,21 +725,33 @@ export function NeonDungeon() {
 
     /* synth / bass: area e modificadores */
     if (variant === 1) {
-      // Beam Synth: feixe continuo durante o step
-      beams.current.push({
-        x: cx,
-        y: cy,
-        a,
-        t: 0,
-        life: Math.max(0.12, stepDur),
-        dmg: 4 * dMul,
-        tick: 0,
-      });
+      // Beam Synth: dois feixes opostos que varrem a sala durante o step
+      for (const off of [0, Math.PI])
+        beams.current.push({
+          x: cx,
+          y: cy,
+          a: a + off,
+          t: 0,
+          life: Math.max(0.14, stepDur * 1.4),
+          dmg: 4 * dMul,
+          tick: 0,
+        });
       return;
     }
     if (variant === 2) {
-      // Vamp Bass: janela de cura ao derrotar inimigos sob o som
+      // Vamp Bass: janela de cura + estrelas de sucção lentas
       vamp.current = 2;
+      for (const off of [-1, 1])
+        shoot({
+          vx: Math.cos(a + off * 0.9) * 180,
+          vy: Math.sin(a + off * 0.9) * 180,
+          r: 5 * sMul,
+          dmg: 2 * dMul,
+          life: 2.4,
+          homing: 4,
+          shape: "star",
+          color: "#3dff9e",
+        });
       pools.current.push({
         x: cx,
         y: cy,
@@ -740,7 +793,7 @@ export function NeonDungeon() {
         if (!see) {
           e.lock = null;
           e.steps = 0;
-        } else if (e.steps % 4 === 0) {
+        } else if (e.steps % 8 === 0) {
           const target = e.lock ?? { x: player.current.x, y: player.current.y };
           const dx = target.x - e.x;
           const dy = target.y - e.y;
@@ -1044,6 +1097,9 @@ export function NeonDungeon() {
         ).length;
         const auraMul = 1 + Math.min(0.6, sirens * 0.3);
 
+        /** inimigos gerados neste frame (divisao do boss redondo) */
+        const born: Enemy[] = [];
+
         for (const e of cur.enemies) {
           if (e.spawnT > 0) {
             e.spawnT -= dt;
@@ -1069,7 +1125,9 @@ export function NeonDungeon() {
             e.behavior === "SIREN_SPEED_AURA" ||
             e.behavior === "DASH_CHARGE" ||
             e.behavior === "SIREN_HEALER" ||
-            e.behavior === "BASS_QUAKE_DOUBLE"
+            e.behavior === "BASS_QUAKE_DOUBLE" ||
+            e.behavior === "BOSS_TRI_SPIRAL" ||
+            e.behavior === "PENTAGON_AMBUSH"
           ) {
             const nx = e.x + (ex / dist) * e.speed * spd * dt;
             const ny = e.y + (ey / dist) * e.speed * spd * dt;
@@ -1077,6 +1135,155 @@ export function NeonDungeon() {
             if (!enemyBlocked(cur, e.x, ny, flying, e.size)) e.y = ny;
           }
           clampToRoom(e);
+
+          /* ---------- boss redondo: ricochete acelerando + divisao ---------- */
+          if (e.behavior === "BOSS_BOUNCE_SPLIT") {
+            e.bspeed = Math.min(620, (e.bspeed ?? 150) + dt * 26);
+            const vx = e.dvx ?? 1;
+            const vy = e.dvy ?? 0;
+            const nx = e.x + vx * e.bspeed * dt;
+            const ny = e.y + vy * e.bspeed * dt;
+            if (!enemyBlocked(cur, nx, e.y, true, e.size)) e.x = nx;
+            else e.dvx = -vx;
+            if (!enemyBlocked(cur, e.x, ny, true, e.size)) e.y = ny;
+            else e.dvy = -vy;
+            clampToRoom(e);
+
+            /* rastro de tiros no ricochete */
+            e.cooldown = Math.max(-1, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = 1.1;
+              for (let i = 0; i < 6; i++)
+                shots.current.push({
+                  x: e.x,
+                  y: e.y,
+                  vx: Math.cos((i / 6) * Math.PI * 2) * 180,
+                  vy: Math.sin((i / 6) * Math.PI * 2) * 180,
+                  life: 2.4,
+                  color: e.color,
+                  r: 5,
+                  dmg: e.damage,
+                  hostile: true,
+                  pierce: false,
+                  shape: "circle",
+                });
+            }
+
+            /* metade da vida: 2 corpos; um quarto: 4 corpos */
+            if (e.hp > 0 && e.hp <= e.maxHp / 2 && (e.splits ?? 0) < 2) {
+              const gen = (e.splits ?? 0) + 1;
+              e.maxHp = Math.max(8, Math.round(e.maxHp / 4));
+              e.hp = Math.max(4, Math.round(e.hp / 2));
+              e.size = Math.max(22, Math.round(e.size * 0.68));
+              e.splits = gen;
+              const a2 = Math.atan2(e.dvy ?? 0, e.dvx ?? 1) + Math.PI / 2;
+              e.dvx = Math.cos(a2);
+              e.dvy = Math.sin(a2);
+              born.push({
+                ...e,
+                uid: `b${Math.random().toString(36).slice(2, 9)}`,
+                dvx: Math.cos(a2 + Math.PI),
+                dvy: Math.sin(a2 + Math.PI),
+                bspeed: (e.bspeed ?? 150) * 1.15,
+                hitFlash: 0.2,
+                cooldown: 0.6,
+              });
+            }
+          }
+
+          /* ---------- boss triangular: espiral continua pelas 3 pontas ---------- */
+          if (e.behavior === "BOSS_TRI_SPIRAL") {
+            const frac = e.hp / Math.max(1, e.maxHp);
+            const spin = 1.5 + (1 - frac) * 2.2;
+            e.ang = (e.ang ?? 0) + spin * dt;
+            e.cooldown = Math.max(-0.3, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = frac < 0.4 ? 0.09 : 0.14;
+              for (let i = 0; i < 3; i++) {
+                const ang = (e.ang ?? 0) + (i / 3) * Math.PI * 2;
+                shots.current.push({
+                  x: e.x + Math.cos(ang) * e.size * 0.6,
+                  y: e.y + Math.sin(ang) * e.size * 0.6,
+                  vx: Math.cos(ang) * 250,
+                  vy: Math.sin(ang) * 250,
+                  life: 3,
+                  color: e.color,
+                  r: 4.5,
+                  dmg: e.damage,
+                  hostile: true,
+                  pierce: false,
+                  shape: "triangle",
+                });
+              }
+            }
+          }
+
+          /* ---------- pentagono emboscador ---------- */
+          if (e.behavior === "PENTAGON_AMBUSH") {
+            e.ang = (e.ang ?? 0) + dt * 1.2;
+            e.cooldown = Math.max(-0.4, e.cooldown - dt);
+            if (e.cooldown <= 0) {
+              e.cooldown = 1.3;
+              e.steps = (e.steps ?? 0) + 1;
+              const pat = e.steps % 3;
+              const base = Math.atan2(ey, ex);
+              if (pat === 0) {
+                /* lasers snipers rapidos */
+                e.lock = { x: player.current.x, y: player.current.y };
+                for (const off of [-0.09, 0.09])
+                  shots.current.push({
+                    x: e.x,
+                    y: e.y,
+                    vx: Math.cos(base + off) * 820,
+                    vy: Math.sin(base + off) * 820,
+                    life: 1.4,
+                    color: "#ff2e5b",
+                    r: 3.5,
+                    dmg: e.damage,
+                    hostile: true,
+                    pierce: false,
+                  });
+              } else if (pat === 1) {
+                /* bombas flutuantes que explodem em area media */
+                e.lock = null;
+                for (const off of [-0.4, 0.4])
+                  shots.current.push({
+                    x: e.x,
+                    y: e.y,
+                    vx: Math.cos(base + off) * 90,
+                    vy: Math.sin(base + off) * 90,
+                    life: 1.8,
+                    color: "#c8ff3d",
+                    r: 9,
+                    dmg: e.damage,
+                    hostile: true,
+                    pierce: false,
+                    explode: true,
+                    fuse: true,
+                    boomR: 320,
+                    shape: "circle",
+                  });
+              } else {
+                /* triangulos lentos teleguiados */
+                e.lock = null;
+                for (const off of [-0.7, 0, 0.7])
+                  shots.current.push({
+                    x: e.x,
+                    y: e.y,
+                    vx: Math.cos(base + off) * 130,
+                    vy: Math.sin(base + off) * 130,
+                    life: 4,
+                    color: "#9dff2e",
+                    r: 6,
+                    dmg: e.damage,
+                    hostile: true,
+                    pierce: false,
+                    homing: 3,
+                    shape: "triangle",
+                  });
+              }
+            }
+          }
 
           /* ---------- variantes elite ---------- */
           if (e.behavior === "DASH_CHARGE") {
@@ -1335,18 +1542,26 @@ export function NeonDungeon() {
             damagePlayer(e.damage);
         }
 
+        if (born.length && cur.enemies.length < MAX_ENEMIES_PER_ROOM + 4)
+          cur.enemies.push(...born);
+
         /* shots */
         shots.current = shots.current.filter((s) => {
           /* Homing Hat: curva a rota para o inimigo mais proximo */
           if (s.homing) {
             let best: { x: number; y: number } | null = null;
             let bd = Infinity;
-            for (const e of cur.enemies) {
-              if (e.spawnT > 0) continue;
-              const d = Math.hypot(e.x - s.x, e.y - s.y);
-              if (d < bd) {
-                bd = d;
-                best = e;
+            if (s.hostile) {
+              best = player.current;
+              bd = Math.hypot(player.current.x - s.x, player.current.y - s.y);
+            } else {
+              for (const e of cur.enemies) {
+                if (e.spawnT > 0) continue;
+                const d = Math.hypot(e.x - s.x, e.y - s.y);
+                if (d < bd) {
+                  bd = d;
+                  best = e;
+                }
               }
             }
             if (best) {
@@ -1363,8 +1578,34 @@ export function NeonDungeon() {
           s.x += s.vx * dt;
           s.y += s.vy * dt;
           s.life -= dt;
-          if (s.life <= 0) return false;
+          if (s.life <= 0) {
+            if (s.explode)
+              blasts.current.push({
+                x: s.x,
+                y: s.y,
+                t: 0,
+                hit: new Set(),
+                hostile: s.hostile,
+                dmg: s.dmg * 1.5,
+                speed: s.boomR ?? 300,
+                maxT: 0.4,
+                color: s.color,
+              });
+            return false;
+          }
           if (blocksShot(cur, s.x, s.y)) {
+            /* Sub-Kick: ricochete nas paredes */
+            if (s.bounce && s.bounce > 0) {
+              s.bounce -= 1;
+              const bx = blocksShot(cur, s.x + Math.sign(s.vx) * 6, s.y - s.vy * dt);
+              if (bx) s.vx *= -1;
+              else s.vy *= -1;
+              s.x -= s.vx * dt;
+              s.y -= s.vy * dt;
+              if (!s.hostile) hitPillar(cur, s.x, s.y, s.dmg);
+              s.hit = new Set<string>();
+              return true;
+            }
             if (!s.hostile) hitPillar(cur, s.x, s.y, s.dmg);
             if (s.explode)
               blasts.current.push({
@@ -1372,8 +1613,9 @@ export function NeonDungeon() {
                 y: s.y,
                 t: 0,
                 hit: new Set(),
+                hostile: s.hostile,
                 dmg: s.dmg * 1.5,
-                speed: 300,
+                speed: s.boomR ?? 300,
                 maxT: 0.4,
                 color: s.color,
               });
@@ -1406,8 +1648,9 @@ export function NeonDungeon() {
                     y: s.y,
                     t: 0,
                     hit: new Set(),
+                    hostile: s.hostile,
                     dmg: s.dmg * 1.5,
-                    speed: 300,
+                    speed: s.boomR ?? 300,
                     maxT: 0.4,
                     color: s.color,
                   });
@@ -1529,7 +1772,27 @@ export function NeonDungeon() {
           }
           setKills((v) => v + dying.length);
           cur.enemies = cur.enemies.filter((e) => e.hp > 0);
-          if (cur.enemies.length === 0 && cur.state === "COMBAT") clearRoom(cur);
+          if (cur.enemies.length === 0 && cur.state === "COMBAT") {
+            /* 25% de chance de emboscada pentagonal ao limpar a sala */
+            if (cur.type === "NORMAL" && !cur.ambushed && Math.random() < AMBUSH_CHANCE) {
+              cur.ambushed = true;
+              const ang = Math.random() * Math.PI * 2;
+              const spot = safeDropSpot(
+                cur,
+                player.current.x + Math.cos(ang) * 200,
+                player.current.y + Math.sin(ang) * 200,
+              );
+              const amb = makeEnemy(
+                "pentagon_ambusher",
+                spot.x,
+                spot.y,
+                floorRef.current.level,
+              );
+              amb.spawnT = 1;
+              cur.enemies.push(amb);
+              glitch.current = 0.6;
+            } else clearRoom(cur);
+          }
         }
 
         shield.current = Math.max(0, shield.current - dt);

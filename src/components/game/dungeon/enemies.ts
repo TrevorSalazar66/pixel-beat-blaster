@@ -12,7 +12,15 @@ export type Behavior =
   | "SHOOT_SPREAD_BURST"
   | "FLY_TELEPORT_BLINK"
   | "SIREN_HEALER"
-  | "BASS_QUAKE_DOUBLE";
+  | "BASS_QUAKE_DOUBLE"
+  /* bosses alternativos */
+  | "BOSS_BOUNCE_SPLIT"
+  | "BOSS_TRI_SPIRAL"
+  /* emboscada pos-sala */
+  | "PENTAGON_AMBUSH";
+
+/** Forma desenhada do inimigo. */
+export type EnemyShape = "square" | "circle" | "triangle" | "pentagon";
 
 export type EnemyDef = {
   id: string;
@@ -25,6 +33,7 @@ export type EnemyDef = {
   color: string;
   /** inimigo variante (elite) */
   variant?: boolean;
+  shape?: EnemyShape;
 };
 
 export const ENEMY_DEFS: EnemyDef[] = [
@@ -64,6 +73,39 @@ export const ENEMY_DEFS: EnemyDef[] = [
     speed: 1.25,
     behavior: "BOSS_PATTERN_WAVES_AND_PROJECTILES",
     color: "#aa00ff",
+  },
+  {
+    id: "boss_bouncer",
+    name: "Sub-Esfera Ricochete",
+    hpBase: 190,
+    damageBase: 3,
+    speed: 0,
+    behavior: "BOSS_BOUNCE_SPLIT",
+    color: "#00e5ff",
+    shape: "circle",
+  },
+  {
+    id: "boss_trigon",
+    name: "Trigon Espiral",
+    hpBase: 200,
+    damageBase: 3,
+    speed: 0.7,
+    behavior: "BOSS_TRI_SPIRAL",
+    fireRate: 0.14,
+    color: "#ffe23d",
+    shape: "triangle",
+  },
+  {
+    id: "pentagon_ambusher",
+    name: "Pentagono Emboscador",
+    hpBase: 70,
+    damageBase: 2,
+    speed: 0.9,
+    behavior: "PENTAGON_AMBUSH",
+    fireRate: 1.3,
+    color: "#c8ff3d",
+    shape: "pentagon",
+    variant: true,
   },
   {
     id: "siren_support",
@@ -171,6 +213,12 @@ export const COMMON_ENEMY_IDS = [
 ];
 
 /** Variantes elite: sorteadas com chance menor conforme o andar. */
+/** Bosses possiveis na sala de boss. */
+export const BOSS_IDS = ["boss_synth_lord", "boss_bouncer", "boss_trigon"];
+
+/** Chance de uma emboscada pentagonal apos limpar a sala. */
+export const AMBUSH_CHANCE = 0.25;
+
 export const VARIANT_ENEMY_IDS = [
   "chaser_neon_elite",
   "turret_pixel_burst",
@@ -233,4 +281,10 @@ export type Enemy = {
   dashT?: number;
   dvx?: number;
   dvy?: number;
+  /** rotacao atual (boss triangular) */
+  ang?: number;
+  /** velocidade do ricochete (boss redondo) */
+  bspeed?: number;
+  /** quantas vezes este corpo ja se dividiu */
+  splits?: number;
 };

@@ -1,6 +1,7 @@
 import { DOOR_COLS, DOOR_ROWS, PILLAR_HP, ROOM_H, ROOM_W, T } from "./tiles";
 import {
   COMMON_ENEMY_IDS,
+  BOSS_IDS,
   MAX_ENEMIES_PER_ROOM,
   enemyCount,
   getDef,
@@ -31,6 +32,8 @@ export type Room = {
   layout: RoomLayout;
   /** vida dos pilares destrutiveis, indexada por "tx,ty" */
   pillars: Record<string, number>;
+  /** emboscada pentagonal ja sorteada nesta sala */
+  ambushed?: boolean;
 };
 
 export type Floor = {
@@ -246,7 +249,7 @@ export function generateFloor(level: number): Floor {
 }
 
 let uid = 0;
-function makeEnemy(defId: string, x: number, y: number, level: number, boss = false): Enemy {
+export function makeEnemy(defId: string, x: number, y: number, level: number, boss = false): Enemy {
   const def = getDef(defId);
   const hp = scaledHp(def.hpBase, level);
   return {
@@ -262,13 +265,15 @@ function makeEnemy(defId: string, x: number, y: number, level: number, boss = fa
     color: def.color,
     size: boss
       ? 64
-      : def.id === "infected_speaker"
-        ? 42
-        : def.id === "bass_dropper" || def.id === "bass_dropper_quake"
-          ? 36
-          : def.variant
-            ? 30
-            : 26,
+      : def.id === "pentagon_ambusher"
+        ? 46
+        : def.id === "infected_speaker"
+          ? 42
+          : def.id === "bass_dropper" || def.id === "bass_dropper_quake"
+            ? 36
+            : def.variant
+              ? 30
+              : 26,
     cooldown: def.fireRate ?? 1.6,
     spawnT: 0.5,
     hitFlash: 0,
@@ -281,6 +286,9 @@ function makeEnemy(defId: string, x: number, y: number, level: number, boss = fa
     dashT: 0,
     dvx: 0,
     dvy: 0,
+    ang: Math.random() * Math.PI * 2,
+    bspeed: 150,
+    splits: 0,
   };
 }
 
@@ -292,13 +300,19 @@ export function spawnEnemies(room: Room, level: number): Enemy[] {
         spots.push({ x: x * TILE + TILE / 2, y: y * TILE + TILE / 2 });
 
   if (room.type === "BOSS") {
+    const bossId = BOSS_IDS[Math.floor(Math.random() * BOSS_IDS.length)]!;
     const boss = makeEnemy(
-      "boss_synth_lord",
+      bossId,
       (ROOM_W * TILE) / 2,
       (ROOM_H * TILE) / 2 - 40,
       level,
       true,
     );
+    if (boss.behavior === "BOSS_BOUNCE_SPLIT") {
+      const a = Math.random() * Math.PI * 2;
+      boss.dvx = Math.cos(a);
+      boss.dvy = Math.sin(a);
+    }
     return [boss];
   }
 
