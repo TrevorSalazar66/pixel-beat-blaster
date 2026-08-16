@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 export type Orientation = "PORTRAIT" | "LANDSCAPE";
 
 export interface MobileControlConfig {
@@ -11,20 +13,30 @@ export interface MobileControlConfig {
 
 export type HUDElementId = "minimap" | "stats" | "btnMix" | "btnInventory" | "btnConfig";
 
+/** Cantos de ancoragem: guardamos o canto + offset em %, nunca pixels. */
+export type Anchor =
+  | "TOP_LEFT"
+  | "TOP_CENTER"
+  | "TOP_RIGHT"
+  | "MID_LEFT"
+  | "MID_RIGHT"
+  | "BOTTOM_LEFT"
+  | "BOTTOM_CENTER"
+  | "BOTTOM_RIGHT";
+
 export interface HUDElementPosition {
   elementId: HUDElementId;
-  x: number; // % da largura (0-100)
-  y: number; // % da altura (0-100)
+  anchor: Anchor;
+  /** offset horizontal em % da largura da tela */
+  dx: number;
+  /** offset vertical em % da altura da tela */
+  dy: number;
 }
 
-export interface MovementGestureLine {
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-  opacity: number;
-  active: boolean;
-}
+export type AnchoredPos = { anchor: Anchor; dx: number; dy: number };
+
+/** Zonas dos polegares: cantos inferiores reservados para os analogicos. */
+export const THUMB_ZONE = { y: 64, left: 30, right: 70 };
 
 /** Estado de input compartilhado entre a UI touch e o loop do jogo. */
 export type TouchInput = {
@@ -46,22 +58,58 @@ export type GameSettings = Pick<MobileControlConfig, "brightness" | "volume" | "
 
 export const DEFAULT_SETTINGS: GameSettings = { brightness: 1, volume: 0.28, gameSpeed: 1 };
 
-export const DEFAULT_LAYOUT: Record<
-  Orientation,
-  Record<HUDElementId, { x: number; y: number }>
-> = {
+export const DEFAULT_LAYOUT: Record<Orientation, Record<HUDElementId, AnchoredPos>> = {
   PORTRAIT: {
-    minimap: { x: 68, y: 2 },
-    stats: { x: 3, y: 2 },
-    btnMix: { x: 4, y: 52 },
-    btnInventory: { x: 24, y: 52 },
-    btnConfig: { x: 80, y: 52 },
+    stats: { anchor: "TOP_LEFT", dx: 2, dy: 2 },
+    minimap: { anchor: "TOP_RIGHT", dx: -2, dy: 2 },
+    btnMix: { anchor: "TOP_CENTER", dx: -13, dy: 1 },
+    btnInventory: { anchor: "TOP_CENTER", dx: 0, dy: 1 },
+    btnConfig: { anchor: "TOP_CENTER", dx: 13, dy: 1 },
   },
   LANDSCAPE: {
-    minimap: { x: 78, y: 3 },
-    stats: { x: 3, y: 3 },
-    btnMix: { x: 34, y: 84 },
-    btnInventory: { x: 47, y: 84 },
-    btnConfig: { x: 60, y: 84 },
+    stats: { anchor: "TOP_LEFT", dx: 2, dy: 3 },
+    minimap: { anchor: "TOP_RIGHT", dx: -2, dy: 3 },
+    btnMix: { anchor: "TOP_CENTER", dx: -11, dy: 2 },
+    btnInventory: { anchor: "TOP_CENTER", dx: 0, dy: 2 },
+    btnConfig: { anchor: "TOP_CENTER", dx: 11, dy: 2 },
   },
 };
+
+/** Converte ancoragem + offset em estilo CSS relativo (sem pixels fixos). */
+export function anchorStyle(pos: AnchoredPos): CSSProperties {
+  const a = pos.anchor;
+  const style: CSSProperties = { position: "absolute" };
+  const tx: string[] = [];
+  if (a.endsWith("LEFT")) style.left = `${pos.dx}%`;
+  else if (a.endsWith("RIGHT")) style.right = `${-pos.dx}%`;
+  else {
+    style.left = `${50 + pos.dx}%`;
+    tx.push("translateX(-50%)");
+  }
+  if (a.startsWith("TOP")) style.top = `${pos.dy}%`;
+  else if (a.startsWith("BOTTOM")) style.bottom = `${-pos.dy}%`;
+  else {
+    style.top = `${50 + pos.dy}%`;
+    tx.push("translateY(-50%)");
+  }
+  if (tx.length) style.transform = tx.join(" ");
+  return style;
+}
+
+/** Descobre o canto mais proximo de uma posicao em % e devolve o offset relativo. */
+export function toAnchored(xPct: number, yPct: number): AnchoredPos {
+  const horiz = xPct < 33 ? "LEFT" : xPct > 67 ? "RIGHT" : "CENTER";
+  const vert = yPct < 34 ? "TOP" : yPct > 66 ? "BOTTOM" : "MID";
+  let anchor: Anchor;
+  if (vert === "MID") anchor = (horiz === "RIGHT" ? "MID_RIGHT" : "MID_LEFT") as Anchor;
+  else anchor = `${vert}_${horiz}` as Anchor;
+
+  const dx =
+    anchor.endsWith("LEFT")
+      ? xPct
+      : anchor.endsWith("RIGHT")
+        ? xPct - 100
+        : xPct - 50;
+  const dy = anchor.startsWith("TOP") ? yPct : anchor.startsWith("BOTTOM") ? yPct - 100 : yPct - 50;
+  return { anchor, dx, dy };
+}

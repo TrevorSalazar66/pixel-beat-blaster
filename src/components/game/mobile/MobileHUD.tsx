@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { Minimap } from "../Minimap";
 import type { Floor } from "../dungeon/generate";
-import type { HUDElementId, Orientation } from "./types";
+import { anchorStyle, type HUDElementId, type Orientation } from "./types";
 import { useHudLayout } from "@/hooks/useHudLayout";
 
 type Props = {
@@ -32,15 +32,24 @@ export function MobileHUD({
 }: Props) {
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
+      {editing && (
+        <>
+          <div className="absolute bottom-0 left-0 h-[36%] w-[30%] rounded-tr-2xl border-2 border-dashed border-neon-cyan/40 bg-neon-cyan/5" />
+          <div className="absolute bottom-0 right-0 h-[36%] w-[30%] rounded-tl-2xl border-2 border-dashed border-neon-magenta/40 bg-neon-magenta/5" />
+        </>
+      )}
       <Draggable id="minimap" editing={editing} layout={layout}>
-        <div className="rounded-md border border-neon-cyan/60 bg-background/40 p-1 opacity-80">
+        <div className="flex items-center gap-1 rounded-md border border-neon-cyan/60 bg-background/40 p-1 opacity-85">
           <Minimap floor={floor} currentId={roomId} />
+          <span className="shrink-0 font-pixel text-[8px] uppercase text-neon-cyan">
+            B{floor.level}
+          </span>
         </div>
       </Draggable>
 
       <Draggable id="stats" editing={editing} layout={layout}>
-        <div className="flex flex-col gap-1 rounded-md border border-neon-magenta/40 bg-background/50 px-2 py-1.5">
-          <div className="flex gap-1">
+        <div className="flex items-center gap-2 rounded-md border border-neon-magenta/40 bg-background/50 px-2 py-1.5">
+          <div className="flex shrink-0 gap-1">
             {Array.from({ length: maxHp }).map((_, i) => (
               <div
                 key={i}
@@ -53,8 +62,7 @@ export function MobileHUD({
               />
             ))}
           </div>
-          <div className="font-pixel text-[8px] text-neon-yellow">♪ {coins}</div>
-          <div className="font-pixel text-[8px] uppercase text-neon-cyan">B{floor.level}</div>
+          <div className="shrink-0 font-pixel text-[8px] text-neon-yellow">♪ {coins}</div>
         </div>
       </Draggable>
 
@@ -107,6 +115,7 @@ function Draggable({
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const pos = layout.layout[id];
+  const style = anchorStyle(pos);
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (!editing) return;
@@ -117,8 +126,9 @@ function Draggable({
     const rect = parent.getBoundingClientRect();
     const el = ref.current!;
     el.setPointerCapture(e.pointerId);
-    const grabX = e.clientX - el.getBoundingClientRect().left;
-    const grabY = e.clientY - el.getBoundingClientRect().top;
+    const box = el.getBoundingClientRect();
+    const grabX = e.clientX - box.left;
+    const grabY = e.clientY - box.top;
     const move = (ev: PointerEvent) => {
       layout.move(
         id,
@@ -138,10 +148,10 @@ function Draggable({
     <div
       ref={ref}
       onPointerDown={onPointerDown}
-      className={`pointer-events-auto absolute touch-none ${
+      className={`pointer-events-auto absolute max-w-[46%] touch-none ${
         editing ? "cursor-move rounded-md outline-dashed outline-2 outline-neon-magenta/80" : ""
       }`}
-      style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+      style={style}
     >
       {children}
     </div>

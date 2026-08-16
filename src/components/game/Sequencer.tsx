@@ -1,4 +1,4 @@
-import { STEPS, TRACKS, type Pattern } from "./tracks";
+import { STEPS, TRACKS, VARIANT_TAG, type Pattern } from "./tracks";
 
 type Props = {
   pattern: Pattern;
@@ -24,7 +24,7 @@ export function Sequencer({ pattern, currentStep, bpm }: Props) {
                 return (
                   <div
                     key={s}
-                    className="h-2 rounded-[1px] border"
+                    className="flex h-2 items-center justify-center overflow-hidden rounded-[1px] border font-pixel text-[5px] leading-none text-background"
                     style={{
                       borderColor: `${track.color}44`,
                       background: cell
@@ -37,7 +37,9 @@ export function Sequencer({ pattern, currentStep, bpm }: Props) {
                       boxShadow: cell && active ? `0 0 10px ${track.color}` : "none",
                       opacity: cell ? 1 : 0.6,
                     }}
-                  />
+                  >
+                    {cell ? VARIANT_TAG[cell.variant] : ""}
+                  </div>
                 );
               })}
             </div>

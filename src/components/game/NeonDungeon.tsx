@@ -100,6 +100,7 @@ export function NeonDungeon() {
   const fireCd = useRef(0);
   const bpmRef = useRef(bpm);
   bpmRef.current = bpm + bpmMod;
+  const maxHpRef = useRef(START_HP);
   const bpmModRef = useRef(0);
   bpmModRef.current = bpmMod;
 
@@ -122,6 +123,7 @@ export function NeonDungeon() {
   const roomIdRef = useRef(roomId);
   roomIdRef.current = roomId;
   const coinsRef = useRef(coins);
+  maxHpRef.current = maxHp;
   coinsRef.current = coins;
   const deadRef = useRef(dead);
   deadRef.current = dead;
@@ -312,6 +314,8 @@ export function NeonDungeon() {
     player.current = { x: W / 2, y: H / 2 };
     shots.current = [];
     blasts.current = [];
+    pools.current = [];
+    beams.current = [];
     pickups.current = [];
     pedestals.current = {};
     window.setTimeout(() => setTransition(null), 900);
@@ -775,6 +779,9 @@ export function NeonDungeon() {
                 y: back === "NORTH" ? TILE * 1.6 : back === "SOUTH" ? H - TILE * 1.6 : H / 2,
               };
               shots.current = [];
+              pools.current = [];
+              beams.current = [];
+              blasts.current = [];
               pickups.current = [];
               enterRoom(nextRoom);
               raf = requestAnimationFrame(loop);
@@ -1123,6 +1130,38 @@ export function NeonDungeon() {
               ctx.fill();
             }
             ctx.restore();
+          } else if (id === T.PILLAR) {
+            ctx.save();
+            ctx.fillStyle = "#4a5a8f";
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = "#7aa2ff";
+            ctx.fillRect(px + 3, py + 3, TILE - 6, TILE - 6);
+            const hpLeft = (cur.pillars[`${x},${y}`] ?? PILLAR_HP) / PILLAR_HP;
+            ctx.fillStyle = "#0d0f18";
+            ctx.fillRect(px + 6, py + TILE - 9, TILE - 12, 3);
+            ctx.fillStyle = "#7aa2ff";
+            ctx.fillRect(px + 6, py + TILE - 9, (TILE - 12) * hpLeft, 3);
+            ctx.restore();
+          } else if (id === T.BPM_UP || id === T.BPM_DOWN || id === T.AMPLIFIER) {
+            const col =
+              id === T.BPM_UP ? "#ff2e5b" : id === T.BPM_DOWN ? "#2ec8ff" : "#b14dff";
+            ctx.save();
+            ctx.globalAlpha = 0.35 + Math.sin(now / 260) * 0.15;
+            ctx.strokeStyle = col;
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = col;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(px + 4.5, py + 4.5, TILE - 9, TILE - 9);
+            ctx.globalAlpha = 0.85;
+            ctx.fillStyle = col;
+            ctx.font = "8px 'Press Start 2P', monospace";
+            ctx.textAlign = "center";
+            ctx.fillText(
+              id === T.BPM_UP ? "+" : id === T.BPM_DOWN ? "-" : "x2",
+              px + TILE / 2,
+              py + TILE / 2 + 4,
+            );
+            ctx.restore();
           } else if (id === T.DOOR) {
             const locked = cur.doors.some((d) => d.locked);
             ctx.save();
@@ -1198,6 +1237,50 @@ export function NeonDungeon() {
         ctx.restore();
       }
 
+      /* pocas de som */
+      for (const pl of pools.current) {
+        ctx.save();
+        ctx.globalAlpha = 0.25 + Math.sin(now / 120) * 0.08;
+        ctx.fillStyle = "#b14dff";
+        ctx.shadowBlur = 24;
+        ctx.shadowColor = "#b14dff";
+        ctx.beginPath();
+        ctx.arc(pl.x, pl.y, pl.r * (1 - pl.t / pl.life / 4), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      /* feixes laser (Beam Synth) */
+      for (const bm of beams.current) {
+        ctx.save();
+        ctx.globalAlpha = 0.85;
+        ctx.strokeStyle = "#3dff9e";
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = "#3dff9e";
+        ctx.lineWidth = 6 + Math.sin(now / 40) * 2;
+        ctx.beginPath();
+        ctx.moveTo(bm.x, bm.y);
+        ctx.lineTo(bm.x + Math.cos(bm.a) * 1200, bm.y + Math.sin(bm.a) * 1200);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      /* miras laser travadas (Laser-Sniper) */
+      for (const e of cur.enemies) {
+        if (!e.lock || e.spawnT > 0) continue;
+        ctx.save();
+        ctx.globalAlpha = 0.45 + Math.sin(now / 90) * 0.2;
+        ctx.strokeStyle = "#ff2e5b";
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = "#ff2e5b";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(e.x, e.y);
+        ctx.lineTo(e.lock.x, e.lock.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       /* enemies */
       for (const e of cur.enemies) {
         ctx.save();
@@ -1215,7 +1298,22 @@ export function NeonDungeon() {
         ctx.shadowBlur = 16;
         ctx.shadowColor = e.color;
         ctx.fillStyle = e.hitFlash > 0 ? "#ffffff" : e.color;
+        ctx.globalAlpha = e.stun > 0 ? 0.55 : 1;
         ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2, e.size, e.size);
+        if (e.behavior === "SIREN_SPEED_AURA") {
+          ctx.globalAlpha = 0.3;
+          ctx.strokeStyle = e.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(e.x, e.y, 34 + Math.sin(now / 200) * 6, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        if (e.behavior === "INFECTED_SPEAKER_SPAWNER") {
+          ctx.globalAlpha = 0.5 + Math.sin(now / 150) * 0.3;
+          ctx.strokeStyle = "#3dff9e";
+          ctx.lineWidth = 3;
+          ctx.strokeRect(e.x - e.size / 2 - 5, e.y - e.size / 2 - 5, e.size + 10, e.size + 10);
+        }
         ctx.restore();
         ctx.fillStyle = "#00000088";
         ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2 - 7, e.size, 3);
@@ -1236,13 +1334,14 @@ export function NeonDungeon() {
       /* blasts */
       for (const b of blasts.current) {
         ctx.save();
-        ctx.globalAlpha = Math.max(0, 1 - b.t / 0.45);
+        const bc = b.color ?? "#b14dff";
+        ctx.globalAlpha = Math.max(0, 1 - b.t / (b.maxT ?? 0.45));
         ctx.shadowBlur = 20;
-        ctx.shadowColor = "#b14dff";
-        ctx.strokeStyle = "#b14dff";
+        ctx.shadowColor = bc;
+        ctx.strokeStyle = bc;
         ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.arc(b.x, b.y, b.t * 260, 0, Math.PI * 2);
+        ctx.arc(b.x, b.y, b.t * (b.speed ?? 260), 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }
@@ -1477,6 +1576,7 @@ export function NeonDungeon() {
             currentStep={currentStep}
             onPlace={placeBlock}
             onRemove={removeBlock}
+            onCycleVariant={cycleVariant}
             onClose={() => setEditorOpen(false)}
           />
         )}
