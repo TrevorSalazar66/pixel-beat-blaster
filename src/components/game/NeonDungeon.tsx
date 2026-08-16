@@ -327,9 +327,10 @@ export function NeonDungeon() {
     for (let i = 0; i < n; i++) {
       const track = rollBlock();
       const t = TRACKS.find((x) => x.id === track)!;
+      const spot = safeDropSpot(r, W / 2 + (i - (n - 1) / 2) * 46, H / 2);
       pickups.current.push({
-        x: W / 2 + (i - (n - 1) / 2) * 46,
-        y: H / 2,
+        x: spot.x,
+        y: spot.y,
         kind: "block",
         track,
         color: t.color,
@@ -927,15 +928,22 @@ export function NeonDungeon() {
           ) {
             const nx = e.x + (ex / dist) * e.speed * spd * dt;
             const ny = e.y + (ey / dist) * e.speed * spd * dt;
-            if (!solidFor(cur, nx, e.y, flying)) e.x = nx;
-            if (!solidFor(cur, e.x, ny, flying)) e.y = ny;
+            if (!enemyBlocked(cur, nx, e.y, flying, e.size)) e.x = nx;
+            if (!enemyBlocked(cur, e.x, ny, flying, e.size)) e.y = ny;
           }
+          clampToRoom(e);
 
           if (e.behavior === "SHOOT_AT_PLAYER_PERIODIC" || e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
-            e.cooldown -= dt;
+            const boss = e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES";
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            const canSee =
+              boss || (dist < 620 && hasLineOfSight(cur, e.x, e.y, player.current.x, player.current.y));
             if (e.cooldown <= 0) {
-              e.cooldown = e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES" ? 1.4 : 2;
-              if (e.behavior === "BOSS_PATTERN_WAVES_AND_PROJECTILES") {
+              /* recarrega sempre, mesmo sem tiro: evita rajadas infinitas */
+              e.cooldown = boss ? 1.4 : getDef(e.defId).fireRate ?? 2;
+              if (!canSee) {
+                /* sem linha de visao apenas espera o proximo ciclo */
+              } else if (boss) {
                 for (let i = 0; i < 10; i++) {
                   const a = (i / 10) * Math.PI * 2;
                   shots.current.push({ x: e.x, y: e.y, vx: Math.cos(a) * 200, vy: Math.sin(a) * 200, life: 2.4, color: e.color, r: 5, dmg: e.damage, hostile: true, pierce: false });
@@ -948,10 +956,11 @@ export function NeonDungeon() {
 
           /* Bass-Dropper: onda de choque circular ao se aproximar */
           if (e.behavior === "BASS_DROP_SHOCKWAVE") {
-            e.cooldown -= dt;
-            if (e.cooldown <= 0 && dist < 190) {
+            e.cooldown = Math.max(-0.5, e.cooldown - dt);
+            if (e.cooldown <= 0) {
               e.cooldown = 2.6;
-              blasts.current.push({
+              if (dist < 190)
+                blasts.current.push({
                 x: e.x, y: e.y, t: 0, hit: new Set(),
                 hostile: true, dmg: e.damage, speed: 260, maxT: 0.6, color: "#ff6a00",
               });
@@ -1136,12 +1145,12 @@ export function NeonDungeon() {
             }
             const n = e.size > 40 ? 12 : 1 + Math.floor(Math.random() * 3);
             for (let i = 0; i < n; i++) {
-              pickups.current.push({
-                x: e.x + (Math.random() - 0.5) * 30,
-                y: e.y + (Math.random() - 0.5) * 30,
-                kind: "coin",
-                color: "#ffe23d",
-              });
+              const spot = safeDropSpot(
+                cur,
+                e.x + (Math.random() - 0.5) * 30,
+                e.y + (Math.random() - 0.5) * 30,
+              );
+              pickups.current.push({ x: spot.x, y: spot.y, kind: "coin", color: "#ffe23d" });
             }
           }
           setKills((v) => v + dying.length);
