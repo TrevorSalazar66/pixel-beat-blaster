@@ -16,6 +16,7 @@ import {
   dirDelta,
   generateFloor,
   key,
+  makeEnemy,
   opposite,
   type Dir,
   type Floor,
@@ -23,6 +24,7 @@ import {
 } from "./dungeon/generate";
 import { rollBlock } from "./dungeon/drops";
 import {
+  AMBUSH_CHANCE,
   MAX_ENEMIES_PER_ROOM,
   SPAWNER_ACTIVE_LIMIT,
   SPAWNER_BUDGET,
