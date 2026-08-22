@@ -2101,6 +2101,8 @@ export function NeonDungeon() {
 
       /* enemies */
       for (const e of cur.enemies) {
+        const shape = getDef(e.defId).shape ?? "square";
+        const rot = e.ang ?? 0;
         ctx.save();
         if (e.spawnT > 0) {
           ctx.globalAlpha = 0.4;
@@ -2109,7 +2111,7 @@ export function NeonDungeon() {
           ctx.shadowColor = e.color;
           ctx.lineWidth = 2;
           const s = (0.5 - e.spawnT) / 0.5;
-          ctx.strokeRect(e.x - (e.size / 2) * s, e.y - (e.size / 2) * s, e.size * s, e.size * s);
+          drawShape(ctx, shape, e.x, e.y, (e.size / 2) * s, rot, "stroke");
           ctx.restore();
           continue;
         }
@@ -2117,7 +2119,7 @@ export function NeonDungeon() {
         ctx.shadowColor = e.color;
         ctx.fillStyle = e.hitFlash > 0 ? "#ffffff" : e.color;
         ctx.globalAlpha = e.stun > 0 ? 0.55 : 1;
-        ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2, e.size, e.size);
+        drawShape(ctx, shape, e.x, e.y, e.size / 2, rot, "fill");
         if (e.behavior === "SIREN_SPEED_AURA") {
           ctx.globalAlpha = 0.3;
           ctx.strokeStyle = e.color;
@@ -2132,6 +2134,18 @@ export function NeonDungeon() {
           ctx.lineWidth = 3;
           ctx.strokeRect(e.x - e.size / 2 - 5, e.y - e.size / 2 - 5, e.size + 10, e.size + 10);
         }
+        if (e.behavior === "BOSS_BOUNCE_SPLIT" || e.behavior === "BOSS_TRI_SPIRAL") {
+          ctx.globalAlpha = 0.35 + Math.sin(now / 130) * 0.15;
+          ctx.strokeStyle = e.color;
+          ctx.lineWidth = 3;
+          drawShape(ctx, shape, e.x, e.y, e.size / 2 + 7, rot, "stroke");
+        }
+        if (e.behavior === "PENTAGON_AMBUSH") {
+          ctx.globalAlpha = 0.4 + Math.sin(now / 110) * 0.2;
+          ctx.strokeStyle = "#c8ff3d";
+          ctx.lineWidth = 2;
+          drawShape(ctx, "pentagon", e.x, e.y, e.size / 2 + 6, -rot, "stroke");
+        }
         ctx.restore();
         ctx.fillStyle = "#00000088";
         ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2 - 7, e.size, 3);
@@ -2145,9 +2159,27 @@ export function NeonDungeon() {
         ctx.shadowBlur = 14;
         ctx.shadowColor = s.color;
         ctx.fillStyle = s.color;
-        ctx.fillRect(s.x - s.r, s.y - s.r, s.r * 2, s.r * 2);
+        const rot = Math.atan2(s.vy, s.vx) + Math.PI / 2 + now / 240;
+        /* rastro curto na direcao do movimento */
+        const sp = Math.hypot(s.vx, s.vy) || 1;
+        ctx.globalAlpha = 0.3;
+        ctx.beginPath();
+        ctx.lineWidth = s.r;
+        ctx.strokeStyle = s.color;
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(s.x - (s.vx / sp) * s.r * 2.4, s.y - (s.vy / sp) * s.r * 2.4);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        drawShape(ctx, s.shape, s.x, s.y, s.r, rot, "fill");
+        if (s.explode || s.fuse) {
+          ctx.globalAlpha = 0.5 + Math.sin(now / 70) * 0.3;
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = s.color;
+          drawShape(ctx, s.shape, s.x, s.y, s.r + 4, -rot, "stroke");
+        }
         ctx.restore();
       }
+
 
       /* blasts */
       for (const b of blasts.current) {
