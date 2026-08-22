@@ -50,6 +50,85 @@ const SIZE = 28;
 const SPEED = 190;
 const START_HP = 3;
 
+/** Traca um poligono regular centrado em (x,y) com raio r. */
+function polyPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  sides: number,
+  rot = 0,
+) {
+  ctx.beginPath();
+  for (let i = 0; i < sides; i++) {
+    const a = rot - Math.PI / 2 + (i * Math.PI * 2) / sides;
+    const px = x + Math.cos(a) * r;
+    const py = y + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+/** Estrela de N pontas (raio externo r, interno r*inner). */
+function starPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  points = 5,
+  inner = 0.45,
+  rot = 0,
+) {
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const rad = i % 2 === 0 ? r : r * inner;
+    const a = rot - Math.PI / 2 + (i * Math.PI) / points;
+    const px = x + Math.cos(a) * rad;
+    const py = y + Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+/** Desenha (fill ou stroke) a forma pedida no tamanho dado. */
+function drawShape(
+  ctx: CanvasRenderingContext2D,
+  shape: string | undefined,
+  x: number,
+  y: number,
+  r: number,
+  rot: number,
+  mode: "fill" | "stroke" = "fill",
+) {
+  switch (shape) {
+    case "circle":
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      break;
+    case "triangle":
+      polyPath(ctx, x, y, r * 1.15, 3, rot);
+      break;
+    case "pentagon":
+      polyPath(ctx, x, y, r * 1.1, 5, rot);
+      break;
+    case "diamond":
+      polyPath(ctx, x, y, r * 1.2, 4, rot + Math.PI / 4);
+      break;
+    case "star":
+      starPath(ctx, x, y, r * 1.3, 5, 0.45, rot);
+      break;
+    default:
+      if (mode === "fill") ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      else ctx.strokeRect(x - r, y - r, r * 2, r * 2);
+      return;
+  }
+  if (mode === "fill") ctx.fill();
+  else ctx.stroke();
+}
+
+
 type Vec = { x: number; y: number };
 type Shot = {
   x: number;
